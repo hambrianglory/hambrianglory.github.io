@@ -43,8 +43,9 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# PowerShell test and setup scripts
+# PowerShell test and setup scripts (exclude test scripts but allow upload helpers)
 *.ps1
+!upload-to-github.ps1
 
 # Documentation files (keep only README.md)
 *_COMPLETE.md
