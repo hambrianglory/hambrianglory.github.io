@@ -1,52 +1,54 @@
 # GitHub Pages Deployment Guide for Community Fee Management System
 
-## 🌐 **Deploy Your Next.js App to GitHub Pages**
+## 🌐 **Complete Guide to Deploy on GitHub Pages**
 
 ### **Overview**
-GitHub Pages allows you to host your Community Fee Management System for free directly from your GitHub repository. Since this is a Next.js application, we'll need to configure it for static export.
+GitHub Pages will host your Community Fee Management System as a static website, making it accessible to anyone with the URL. This is perfect for showcasing your project and allowing users to interact with a demo version.
+
+**Your live site will be:** `https://hambrianglory.github.io/community-fee-management/`
 
 ---
 
 ## **Step 1: Configure Next.js for Static Export**
 
 ### **1.1 Update next.config.ts**
-
-Your `next.config.ts` needs to be configured for static export:
-
 ```typescript
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: 'export',
   trailingSlash: true,
+  basePath: process.env.NODE_ENV === 'production' ? '/community-fee-management' : '',
+  assetPrefix: process.env.NODE_ENV === 'production' ? '/community-fee-management' : '',
   images: {
-    unoptimized: true
+    unoptimized: true,
   },
-  basePath: '/community-fee-management',
-  assetPrefix: '/community-fee-management/',
-}
+  experimental: {
+    missingSuspenseWithCSRBailout: false,
+  },
+};
 
-module.exports = nextConfig
+export default nextConfig;
 ```
 
-### **1.2 Add Build Scripts to package.json**
-
-Add these scripts to your `package.json`:
-
+### **1.2 Update package.json Scripts**
 ```json
 {
   "scripts": {
+    "dev": "next dev",
     "build": "next build",
-    "export": "next build && next export",
-    "deploy": "npm run export && gh-pages -d out"
+    "start": "next start",
+    "lint": "next lint",
+    "export": "next build",
+    "deploy": "npm run build && touch out/.nojekyll"
   }
 }
 ```
 
 ---
 
-## **Step 2: Install GitHub Pages Dependencies**
+## **Step 2: Create GitHub Actions Workflow**
 
-### **2.1 Install gh-pages Package**
+### **2.1 Create .github/workflows/deploy.yml**
 
 ```bash
 npm install --save-dev gh-pages
