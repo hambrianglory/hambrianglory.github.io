@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
@@ -21,6 +21,21 @@ export default function LoginPage() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [passwordChangeSuccess, setPasswordChangeSuccess] = useState(false);
   const router = useRouter();
+
+  useEffect(() => {
+    // Initialize local database when component loads
+    const initDB = async () => {
+      try {
+        // This will create the default database if it doesn't exist
+        await localDB.getAllUsers();
+        console.log('Local database initialized successfully');
+      } catch (error) {
+        console.error('Failed to initialize local database:', error);
+      }
+    };
+    
+    initDB();
+  }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
