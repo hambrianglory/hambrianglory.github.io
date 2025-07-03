@@ -47,6 +47,7 @@ next-env.d.ts
 *.ps1
 !upload-to-github.ps1
 !token-upload.ps1
+!deploy-github-pages.ps1
 
 # Documentation files (keep only README.md and essential guides)
 *_COMPLETE.md
