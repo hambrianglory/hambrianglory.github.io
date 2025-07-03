@@ -328,11 +328,11 @@ Health Check: ${healthCheck.isHealthy ? 'HEALTHY' : 'ISSUES FOUND'}`;
       let csvContent = '';
       
       if (type === 'users') {
-        csvContent = 'Name,Email,Phone,NIC,Date of Birth,Address,House Number,Role,Amount,Status,Payment Date,Membership Date\n';
+        csvContent = 'id,name,email,phone,nicNumber,dateOfBirth,address,role,houseNumber,membershipDate,isActive\n';
         members.forEach(member => {
           const dateOfBirth = member.dateOfBirth ? new Date(member.dateOfBirth).toISOString().split('T')[0] : '';
           const membershipDate = member.membershipDate ? new Date(member.membershipDate).toISOString().split('T')[0] : '';
-          csvContent += `"${member.name}","${member.email}","${member.phone}","${member.nicNumber || ''}","${dateOfBirth}","${member.address || ''}","${member.houseNumber || ''}","${member.role}","${member.amount || ''}","${member.status || ''}","${member.paymentDate || ''}","${membershipDate}"\n`;
+          csvContent += `"${member.id}","${member.name}","${member.email}","${member.phone}","${member.nicNumber || ''}","${dateOfBirth}","${member.address || ''}","${member.role}","${member.houseNumber || ''}","${membershipDate}","${member.isActive}"\n`;
         });
       } else {
         const payments = await localDB.getAllPayments();
