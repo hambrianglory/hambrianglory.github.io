@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import { Home, Users, FileText, CreditCard, Settings, LogIn } from 'lucide-react';
+import { LOGO_PATH } from '@/lib/assets';
 
 export default function HomePage() {
   return (
@@ -14,7 +15,7 @@ export default function HomePage() {
             <div className="flex items-center space-x-2 sm:space-x-3">
               <div className="w-10 h-10 sm:w-12 sm:h-12 relative">
                 <Image
-                  src="/logo.png"
+                  src={LOGO_PATH}
                   alt="Hambrian Glory Logo"
                   width={48}
                   height={48}
@@ -48,7 +49,7 @@ export default function HomePage() {
           <div className="mb-6 sm:mb-8">
             <div className="w-24 h-24 sm:w-32 sm:h-32 mx-auto mb-4 sm:mb-6 relative bg-gradient-to-br from-blue-50 to-white rounded-3xl p-3 sm:p-4 shadow-2xl border border-blue-100">
               <Image
-                src="/logo.png"
+                src={LOGO_PATH}
                 alt="Hambrian Glory Logo"
                 width={96}
                 height={96}
