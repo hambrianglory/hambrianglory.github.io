@@ -7,8 +7,9 @@ const nextConfig: NextConfig = {
   images: {
     unoptimized: true
   },
-  basePath: '/community-fee-management',
-  assetPrefix: '/community-fee-management/',
+  // Only use basePath in production
+  basePath: process.env.NODE_ENV === 'production' ? '/community-fee-management' : '',
+  assetPrefix: process.env.NODE_ENV === 'production' ? '/community-fee-management/' : '',
   
   // Environment configuration
   env: {
