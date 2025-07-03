@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { LoginHistoryService } from '@/lib/loginHistory';
 import jwt from 'jsonwebtoken';
 
+// Required for static export
+export const dynamic = 'force-static';
+
 // Verify admin token
 function verifyAdminToken(request: NextRequest) {
   const token = request.headers.get('authorization')?.replace('Bearer ', '');
