@@ -67,11 +67,23 @@ export default function AdminDashboard() {
   // Load data from local database
   const loadData = async () => {
     try {
-      const loadedMembers = await localDB.getAllUsers();
-      setMembers(loadedMembers);
-      setFilteredMembers(loadedMembers);
+      console.log('Loading admin data...');
       
+      // Initialize database first
+      console.log('Initializing database...');
+      await localDB.initializeDatabase();
+      
+      console.log('Loading users...');
+      const allUsers = await localDB.getAllUsers();
+      console.log('Users loaded:', allUsers.length);
+      
+      setMembers(allUsers);
+      setFilteredMembers(allUsers);
+      
+      console.log('Loading statistics...');
       const dbStats = await localDB.getStats();
+      console.log('Stats loaded:', dbStats);
+      
       setStats({
         totalMembers: dbStats.totalUsers,
         totalCollected: dbStats.totalAmount,
@@ -80,9 +92,11 @@ export default function AdminDashboard() {
         communityBalance: dbStats.totalAmount
       });
       
+      console.log('Admin data loaded successfully');
       setLoading(false);
     } catch (error) {
-      console.error('Error loading data:', error);
+      console.error('Error loading admin data:', error);
+      alert(`Failed to load admin data: ${error instanceof Error ? error.message : 'Unknown error'}. Check the browser console for details.`);
       setLoading(false);
     }
   };
@@ -91,11 +105,21 @@ export default function AdminDashboard() {
   const loadLoginHistory = async () => {
     setHistoryLoading(true);
     try {
+      console.log('Loading login history...');
+      console.log('Days:', historyDays, 'Role filter:', historyRoleFilter);
+      
       const result = await localDB.getLoginHistoryWithStats(historyDays, historyRoleFilter, 50, 0);
+      console.log('Login history result:', result);
+      
       setLoginHistory(result.history || []);
       setLoginStats(result.stats);
+      
+      console.log('Login history loaded successfully');
     } catch (error) {
       console.error('Error loading login history:', error);
+      alert(`Failed to load login history: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      setLoginHistory([]);
+      setLoginStats(null);
     } finally {
       setHistoryLoading(false);
     }
@@ -148,40 +172,60 @@ export default function AdminDashboard() {
 
     setLoading(true);
     try {
+      console.log(`Starting ${type} file upload...`);
       const fileContent = await file.text();
+      console.log('File content loaded, length:', fileContent.length);
       
       if (type.toLowerCase() === 'users') {
+        console.log('Parsing users CSV...');
         const userData = await localDB.parseCSV(fileContent);
+        console.log('Parsed users data:', userData.length, 'records');
+        
+        console.log('Importing users...');
         const results = await localDB.importUsers(userData);
+        console.log('Import results:', results);
         
         let message = `Users imported successfully!\n`;
         message += `Added: ${results.added}, Updated: ${results.updated}\n`;
         if (results.errors.length > 0) {
-          message += `Errors: ${results.errors.length}\n${results.errors.join('\n')}`;
+          message += `Errors: ${results.errors.length}\n${results.errors.slice(0, 5).join('\n')}`;
+          if (results.errors.length > 5) {
+            message += `\n... and ${results.errors.length - 5} more errors`;
+          }
         }
         
         alert(message);
         if (results.success) {
+          console.log('Reloading data...');
           await loadData();
         }
       } else if (type.toLowerCase() === 'payments') {
+        console.log('Parsing payments CSV...');
         const paymentData = await localDB.parseCSV(fileContent);
+        console.log('Parsed payments data:', paymentData.length, 'records');
+        
+        console.log('Importing payments...');
         const results = await localDB.importPayments(paymentData);
+        console.log('Import results:', results);
         
         let message = `Payments imported successfully!\n`;
         message += `Added: ${results.added}, Updated: ${results.updated}\n`;
         if (results.errors.length > 0) {
-          message += `Errors: ${results.errors.length}\n${results.errors.join('\n')}`;
+          message += `Errors: ${results.errors.length}\n${results.errors.slice(0, 5).join('\n')}`;
+          if (results.errors.length > 5) {
+            message += `\n... and ${results.errors.length - 5} more errors`;
+          }
         }
         
         alert(message);
         if (results.success) {
+          console.log('Reloading data...');
           await loadData();
         }
       }
     } catch (error) {
       console.error('Upload error:', error);
-      alert('Failed to process file. Please try again.');
+      alert(`Failed to process file: ${error instanceof Error ? error.message : 'Unknown error'}. Check the console for details.`);
     } finally {
       setLoading(false);
       event.target.value = '';
@@ -247,7 +291,10 @@ export default function AdminDashboard() {
 
   const downloadLoginHistory = async (format: 'csv' | 'json') => {
     try {
+      console.log('Downloading login history as', format);
       const data = await localDB.downloadLoginHistory(format, historyDays, historyRoleFilter);
+      console.log('Login history data generated, length:', data.length);
+      
       const blob = new Blob([data], { type: format === 'csv' ? 'text/csv' : 'application/json' });
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -257,9 +304,51 @@ export default function AdminDashboard() {
       link.click();
       document.body.removeChild(link);
       window.URL.revokeObjectURL(url);
+      
+      console.log('Login history download completed');
     } catch (error) {
       console.error('Download error:', error);
-      alert('Failed to download login history.');
+      alert(`Failed to download login history: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  };
+
+  // Debug function to check database status
+  const checkDatabaseStatus = async () => {
+    try {
+      console.log('=== DATABASE STATUS CHECK ===');
+      
+      // Check localStorage
+      const storageData = localStorage.getItem('cfms_encrypted_data');
+      console.log('LocalStorage data exists:', !!storageData);
+      console.log('Storage data length:', storageData?.length || 0);
+      
+      // Check database contents
+      const users = await localDB.getAllUsers();
+      const payments = await localDB.getAllPayments();
+      const loginHistory = await localDB.getLoginHistory();
+      const stats = await localDB.getStats();
+      
+      console.log('Users count:', users.length);
+      console.log('Payments count:', payments.length);
+      console.log('Login history count:', loginHistory.length);
+      console.log('Stats:', stats);
+      
+      // Check sample data
+      const adminUser = users.find(u => u.role === 'admin');
+      console.log('Admin user exists:', !!adminUser);
+      console.log('Admin email:', adminUser?.email);
+      
+      alert(`Database Status:
+Users: ${users.length}
+Payments: ${payments.length}
+Login History: ${loginHistory.length}
+Admin User: ${adminUser ? 'Found' : 'Missing'}
+
+Check the browser console for detailed information.`);
+      
+    } catch (error) {
+      console.error('Database status check failed:', error);
+      alert(`Database check failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   };
 
@@ -282,6 +371,14 @@ export default function AdminDashboard() {
               <h1 className="text-2xl font-bold text-gray-900">Admin Dashboard</h1>
             </div>
             <div className="flex items-center space-x-4">
+              <button
+                onClick={checkDatabaseStatus}
+                className="flex items-center space-x-2 text-gray-700 hover:text-blue-600 px-3 py-2 rounded border"
+                title="Check Database Status"
+              >
+                <Shield className="w-4 h-4" />
+                <span className="hidden sm:inline">Debug DB</span>
+              </button>
               <button
                 onClick={handleLogout}
                 className="flex items-center space-x-2 text-gray-700 hover:text-red-600"

@@ -62,26 +62,55 @@ interface Database {
 
 class EncryptedLocalStorage {
   private encrypt(data: string): string {
-    return CryptoJS.AES.encrypt(data, ENCRYPTION_KEY).toString();
+    try {
+      return CryptoJS.AES.encrypt(data, ENCRYPTION_KEY).toString();
+    } catch (error) {
+      console.error('Encryption error:', error);
+      throw new Error('Failed to encrypt data');
+    }
   }
 
   private decrypt(encryptedData: string): string {
-    const bytes = CryptoJS.AES.decrypt(encryptedData, ENCRYPTION_KEY);
-    return bytes.toString(CryptoJS.enc.Utf8);
+    try {
+      const bytes = CryptoJS.AES.decrypt(encryptedData, ENCRYPTION_KEY);
+      const decrypted = bytes.toString(CryptoJS.enc.Utf8);
+      if (!decrypted) {
+        throw new Error('Decryption resulted in empty string');
+      }
+      return decrypted;
+    } catch (error) {
+      console.error('Decryption error:', error);
+      throw new Error('Failed to decrypt data');
+    }
   }
 
   private getDatabase(): Database {
     try {
+      if (typeof window === 'undefined') {
+        // Server-side rendering - return empty database
+        return this.createDefaultDatabase();
+      }
+
       const encrypted = localStorage.getItem(STORAGE_KEY);
       if (!encrypted) {
+        console.log('No existing database found, creating default database');
         return this.createDefaultDatabase();
       }
       
       const decrypted = this.decrypt(encrypted);
       const data = JSON.parse(decrypted);
+      
+      // Validate database structure
+      if (!data.users || !data.payments || !data.loginHistory || !data.settings) {
+        console.log('Invalid database structure, recreating database');
+        return this.createDefaultDatabase();
+      }
+      
+      console.log('Database loaded successfully');
       return data;
     } catch (error) {
       console.error('Error reading database:', error);
+      console.log('Creating new database due to error');
       return this.createDefaultDatabase();
     }
   }
@@ -169,10 +198,41 @@ class EncryptedLocalStorage {
       }
     ];
 
+    const sampleLoginHistory: LoginHistory[] = [
+      {
+        id: 'login-001',
+        userId: 'admin-001',
+        email: 'admin@hambriangLory.com',
+        timestamp: new Date().toISOString(),
+        ip: 'localhost',
+        userAgent: navigator.userAgent || 'Unknown',
+        success: true
+      },
+      {
+        id: 'login-002',
+        userId: 'user-001',
+        email: 'john.doe@email.com',
+        timestamp: new Date(Date.now() - 86400000).toISOString(), // 1 day ago
+        ip: 'localhost',
+        userAgent: navigator.userAgent || 'Unknown',
+        success: true
+      },
+      {
+        id: 'login-003',
+        userId: 'unknown',
+        email: 'wrong@email.com',
+        timestamp: new Date(Date.now() - 172800000).toISOString(), // 2 days ago
+        ip: 'localhost',
+        userAgent: navigator.userAgent || 'Unknown',
+        success: false,
+        failureReason: 'Invalid credentials'
+      }
+    ];
+
     const db: Database = {
       users: sampleUsers,
       payments: samplePayments,
-      loginHistory: [],
+      loginHistory: sampleLoginHistory,
       settings: {
         initialized: true,
         version: '1.0.0',
@@ -618,25 +678,75 @@ class EncryptedLocalStorage {
 
   // File parsing helper methods
   async parseCSV(csvText: string): Promise<any[]> {
-    const lines = csvText.split('\n');
-    const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
-    const data: any[] = [];
+    try {
+      if (!csvText || csvText.trim() === '') {
+        throw new Error('CSV content is empty');
+      }
 
-    for (let i = 1; i < lines.length; i++) {
-      const line = lines[i].trim();
-      if (!line) continue;
+      const lines = csvText.split('\n').filter(line => line.trim() !== '');
+      if (lines.length < 2) {
+        throw new Error('CSV must have at least a header row and one data row');
+      }
 
-      const values = line.split(',').map(v => v.trim().replace(/"/g, ''));
-      const row: any = {};
-      
-      headers.forEach((header, index) => {
-        row[header] = values[index] || '';
-      });
-      
-      data.push(row);
+      const headers = this.parseCSVLine(lines[0]);
+      const data: any[] = [];
+
+      for (let i = 1; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) continue;
+
+        try {
+          const values = this.parseCSVLine(line);
+          const row: any = {};
+          
+          headers.forEach((header, index) => {
+            row[header] = values[index] || '';
+          });
+          
+          data.push(row);
+        } catch (error) {
+          console.warn(`Error parsing CSV line ${i + 1}: ${error}`);
+          // Continue with other rows
+        }
+      }
+
+      return data;
+    } catch (error) {
+      console.error('CSV parsing error:', error);
+      throw new Error(`Failed to parse CSV: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
+  }
 
-    return data;
+  private parseCSVLine(line: string): string[] {
+    const result: string[] = [];
+    let current = '';
+    let inQuotes = false;
+    
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i];
+      
+      if (char === '"') {
+        if (inQuotes && line[i + 1] === '"') {
+          // Escaped quote
+          current += '"';
+          i++; // Skip next quote
+        } else {
+          // Toggle quotes
+          inQuotes = !inQuotes;
+        }
+      } else if (char === ',' && !inQuotes) {
+        // Field separator
+        result.push(current.trim());
+        current = '';
+      } else {
+        current += char;
+      }
+    }
+    
+    // Add the last field
+    result.push(current.trim());
+    
+    return result;
   }
 
   async parseExcel(file: File): Promise<any[]> {
@@ -644,6 +754,31 @@ class EncryptedLocalStorage {
     // In a real implementation, you'd use a library like xlsx
     console.warn('Excel parsing not implemented yet. Please use CSV format.');
     return [];
+  }
+
+  // Database initialization method
+  async initializeDatabase(): Promise<void> {
+    try {
+      console.log('Initializing database...');
+      
+      // Force creation of database if it doesn't exist
+      const db = this.getDatabase();
+      
+      // Ensure we have at least some sample data
+      if (db.users.length === 0) {
+        console.log('No users found, recreating database with sample data');
+        const newDb = this.createDefaultDatabase();
+        this.saveDatabase(newDb);
+      }
+      
+      console.log('Database initialized successfully');
+      console.log('Users:', db.users.length);
+      console.log('Payments:', db.payments.length);
+      console.log('Login History:', db.loginHistory.length);
+    } catch (error) {
+      console.error('Database initialization failed:', error);
+      throw new Error(`Database initialization failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
   }
 }
 
