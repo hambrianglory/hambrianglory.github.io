@@ -88,22 +88,37 @@ class EncryptedLocalStorage {
     try {
       if (typeof window === 'undefined') {
         // Server-side rendering - return empty database
+        console.log('Server-side rendering detected, returning default database');
         return this.createDefaultDatabase();
       }
 
       const encrypted = localStorage.getItem(STORAGE_KEY);
       if (!encrypted) {
         console.log('No existing database found, creating default database');
-        return this.createDefaultDatabase();
+        const defaultDb = this.createDefaultDatabase();
+        this.saveDatabase(defaultDb);
+        return defaultDb;
       }
       
-      const decrypted = this.decrypt(encrypted);
+      let decrypted;
+      try {
+        decrypted = this.decrypt(encrypted);
+      } catch (decryptError) {
+        console.error('Decryption failed, creating new database:', decryptError);
+        localStorage.removeItem(STORAGE_KEY);
+        const defaultDb = this.createDefaultDatabase();
+        this.saveDatabase(defaultDb);
+        return defaultDb;
+      }
+      
       const data = JSON.parse(decrypted);
       
       // Validate database structure
       if (!data.users || !data.payments || !data.loginHistory || !data.settings) {
         console.log('Invalid database structure, recreating database');
-        return this.createDefaultDatabase();
+        const defaultDb = this.createDefaultDatabase();
+        this.saveDatabase(defaultDb);
+        return defaultDb;
       }
       
       console.log('Database loaded successfully');
@@ -111,17 +126,26 @@ class EncryptedLocalStorage {
     } catch (error) {
       console.error('Error reading database:', error);
       console.log('Creating new database due to error');
-      return this.createDefaultDatabase();
+      const defaultDb = this.createDefaultDatabase();
+      this.saveDatabase(defaultDb);
+      return defaultDb;
     }
   }
 
   private saveDatabase(db: Database): void {
     try {
+      if (typeof window === 'undefined') {
+        console.log('Server-side rendering, cannot save to localStorage');
+        return;
+      }
+      
       const jsonData = JSON.stringify(db);
       const encrypted = this.encrypt(jsonData);
       localStorage.setItem(STORAGE_KEY, encrypted);
+      console.log('Database saved successfully');
     } catch (error) {
       console.error('Error saving database:', error);
+      throw new Error(`Failed to save database: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
 
@@ -679,16 +703,22 @@ class EncryptedLocalStorage {
   // File parsing helper methods
   async parseCSV(csvText: string): Promise<any[]> {
     try {
+      console.log('parseCSV called with text length:', csvText.length);
+      
       if (!csvText || csvText.trim() === '') {
         throw new Error('CSV content is empty');
       }
 
       const lines = csvText.split('\n').filter(line => line.trim() !== '');
+      console.log('CSV lines after filtering:', lines.length);
+      
       if (lines.length < 2) {
         throw new Error('CSV must have at least a header row and one data row');
       }
 
       const headers = this.parseCSVLine(lines[0]);
+      console.log('CSV headers:', headers);
+      
       const data: any[] = [];
 
       for (let i = 1; i < lines.length; i++) {
@@ -710,6 +740,7 @@ class EncryptedLocalStorage {
         }
       }
 
+      console.log('parseCSV completed, parsed rows:', data.length);
       return data;
     } catch (error) {
       console.error('CSV parsing error:', error);
@@ -778,6 +809,78 @@ class EncryptedLocalStorage {
     } catch (error) {
       console.error('Database initialization failed:', error);
       throw new Error(`Database initialization failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  // Database health check method
+  async checkDatabaseHealth(): Promise<{
+    isHealthy: boolean;
+    issues: string[];
+    stats: {
+      users: number;
+      payments: number;
+      loginHistory: number;
+      storageSize: number;
+    };
+  }> {
+    const issues: string[] = [];
+    let stats = { users: 0, payments: 0, loginHistory: 0, storageSize: 0 };
+
+    try {
+      // Check if we're in browser environment
+      if (typeof window === 'undefined') {
+        issues.push('Not in browser environment');
+        return { isHealthy: false, issues, stats };
+      }
+
+      // Check localStorage availability
+      try {
+        localStorage.setItem('test', 'test');
+        localStorage.removeItem('test');
+      } catch (error) {
+        issues.push('localStorage not available');
+        return { isHealthy: false, issues, stats };
+      }
+
+      // Check database initialization
+      const db = this.getDatabase();
+      
+      // Check database structure
+      if (!db.users || !Array.isArray(db.users)) {
+        issues.push('Users array missing or invalid');
+      }
+      if (!db.payments || !Array.isArray(db.payments)) {
+        issues.push('Payments array missing or invalid');
+      }
+      if (!db.loginHistory || !Array.isArray(db.loginHistory)) {
+        issues.push('Login history array missing or invalid');
+      }
+      if (!db.settings || typeof db.settings !== 'object') {
+        issues.push('Settings object missing or invalid');
+      }
+
+      // Get stats
+      stats = {
+        users: db.users?.length || 0,
+        payments: db.payments?.length || 0,
+        loginHistory: db.loginHistory?.length || 0,
+        storageSize: localStorage.getItem(STORAGE_KEY)?.length || 0
+      };
+
+      // Check for admin user
+      const adminUser = db.users?.find(u => u.role === 'admin');
+      if (!adminUser) {
+        issues.push('No admin user found');
+      }
+
+      return {
+        isHealthy: issues.length === 0,
+        issues,
+        stats
+      };
+    } catch (error) {
+      issues.push(`Database health check failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      return { isHealthy: false, issues, stats };
     }
   }
 }

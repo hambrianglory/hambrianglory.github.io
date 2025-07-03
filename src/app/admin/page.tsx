@@ -317,6 +317,10 @@ export default function AdminDashboard() {
     try {
       console.log('=== DATABASE STATUS CHECK ===');
       
+      // Run health check
+      const healthCheck = await localDB.checkDatabaseHealth();
+      console.log('Health check result:', healthCheck);
+      
       // Check localStorage
       const storageData = localStorage.getItem('cfms_encrypted_data');
       console.log('LocalStorage data exists:', !!storageData);
@@ -338,13 +342,22 @@ export default function AdminDashboard() {
       console.log('Admin user exists:', !!adminUser);
       console.log('Admin email:', adminUser?.email);
       
-      alert(`Database Status:
+      let alertMessage = `Database Status:
 Users: ${users.length}
 Payments: ${payments.length}
 Login History: ${loginHistory.length}
 Admin User: ${adminUser ? 'Found' : 'Missing'}
+Storage Size: ${(storageData?.length || 0)} bytes
 
-Check the browser console for detailed information.`);
+Health Check: ${healthCheck.isHealthy ? 'HEALTHY' : 'ISSUES FOUND'}`;
+
+      if (!healthCheck.isHealthy) {
+        alertMessage += `\n\nIssues:\n${healthCheck.issues.join('\n')}`;
+      }
+
+      alertMessage += '\n\nCheck the browser console for detailed information.';
+      
+      alert(alertMessage);
       
     } catch (error) {
       console.error('Database status check failed:', error);
