@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Community Fee Management System</title>
+    <meta http-equiv="refresh" content="0; url=./index.html">
+    <link rel="canonical" href="https://hambrianglory.github.io/">
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" href="./logo.png">
+    
+    <!-- Meta tags for SEO -->
+    <meta name="description" content="Community Fee Management System - Professional community management with automatic cross-device synchronization">
+    <meta name="keywords" content="community management, fee management, payment tracking, member management">
+    <meta name="author" content="Hambrian Glory Community">
+    
+    <!-- Open Graph tags -->
+    <meta property="og:title" content="Community Fee Management System">
+    <meta property="og:description" content="Professional community management system with automatic cross-device synchronization">
+    <meta property="og:url" content="https://hambrianglory.github.io/">
+    <meta property="og:type" content="website">
+    
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            text-align: center;
+        }
+        .container {
+            max-width: 500px;
+            padding: 2rem;
+        }
+        .logo {
+            width: 80px;
+            height: 80px;
+            margin: 0 auto 1rem;
+            border-radius: 50%;
+            background: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2rem;
+            color: #667eea;
+            font-weight: bold;
+        }
+        h1 {
+            margin: 0 0 1rem;
+            font-size: 2rem;
+            font-weight: 600;
+        }
+        p {
+            margin: 0 0 2rem;
+            opacity: 0.9;
+            line-height: 1.6;
+        }
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid rgba(255,255,255,0.3);
+            border-top: 4px solid white;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .redirect-note {
+            font-size: 0.9rem;
+            opacity: 0.8;
+            margin-top: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">CFM</div>
+        <h1>Community Fee Management System</h1>
+        <p>Professional community management with automatic cross-device synchronization</p>
+        <div class="spinner"></div>
+        <p class="redirect-note">Loading your application...</p>
+    </div>
+    
+    <script>
+        // Fallback redirect if meta refresh doesn't work
+        setTimeout(() => {
+            if (window.location.pathname === '/' || window.location.pathname === '/index.html') {
+                window.location.href = './index.html';
+            }
+        }, 1000);
+    </script>
+</body>
+</html>
