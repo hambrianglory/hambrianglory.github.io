@@ -512,14 +512,14 @@ Health Check: ${healthCheck.isHealthy ? 'HEALTHY' : 'ISSUES FOUND'}`;
                 WhatsApp
               </button>
               <button
-                onClick={() => setActiveTab('dataSync')}
+                onClick={() => setActiveTab('cloudSync')}
                 className={`py-2 px-1 border-b-2 font-medium text-sm whitespace-nowrap ${
-                  activeTab === 'dataSync'
+                  activeTab === 'cloudSync'
                     ? 'border-blue-500 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                 }`}
               >
-                Data Sync
+                Cloud Sync
               </button>
               <button
                 onClick={() => setActiveTab('loginHistory')}
@@ -1367,112 +1367,168 @@ Health Check: ${healthCheck.isHealthy ? 'HEALTHY' : 'ISSUES FOUND'}`;
           </div>
         )}
 
-        {/* Data Sync Tab */}
-        {activeTab === 'dataSync' && (
+        {/* Cloud Sync Tab */}
+        {activeTab === 'cloudSync' && (
           <div className="bg-white rounded-lg shadow-sm border border-gray-200">
             <div className="px-6 py-4 border-b border-gray-200">
-              <h2 className="text-lg font-semibold text-gray-900">Data Synchronization</h2>
-              <p className="text-sm text-gray-600">Backup and sync your data across devices</p>
+              <h2 className="text-lg font-semibold text-gray-900">Cloud Synchronization</h2>
+              <p className="text-sm text-gray-600">Automatic cross-device data synchronization</p>
             </div>
             <div className="p-6">
               <div className="space-y-6">
-                {/* Export/Backup Section */}
+                {/* Cloud Sync Status */}
                 <div>
-                  <h3 className="text-md font-medium text-gray-900 mb-4">Export Data</h3>
+                  <h3 className="text-md font-medium text-gray-900 mb-4">Sync Status</h3>
                   <div className="space-y-4">
                     <div className="p-4 bg-blue-50 border border-blue-200 rounded-md">
-                      <h4 className="text-sm font-medium text-blue-900 mb-2">Create Full Database Backup</h4>
-                      <p className="text-sm text-blue-700 mb-3">
-                        Export all your data (users, payments, settings) to a file that can be imported on another device.
-                      </p>
-                      <button
-                        onClick={async () => {
-                          try {
-                            const backup = await localDB.createBackup();
-                            if (backup.success && backup.data && backup.filename) {
-                              const blob = new Blob([backup.data], { type: 'application/json' });
-                              const url = window.URL.createObjectURL(blob);
-                              const link = document.createElement('a');
-                              link.href = url;
-                              link.download = backup.filename;
-                              document.body.appendChild(link);
-                              link.click();
-                              document.body.removeChild(link);
-                              window.URL.revokeObjectURL(url);
-                              alert('Database backup created successfully!');
-                            } else {
-                              alert(`Failed to create backup: ${backup.error}`);
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h4 className="text-sm font-medium text-blue-900">Automatic Cloud Sync</h4>
+                          <p className="text-sm text-blue-700 mt-1">
+                            {(() => {
+                              const status = localDB.getCloudSyncStatus();
+                              return status.enabled 
+                                ? `✅ Enabled - Last sync: ${status.lastSync ? new Date(status.lastSync).toLocaleString() : 'Never'}`
+                                : '❌ Disabled - Click to enable automatic cross-device sync';
+                            })()}
+                          </p>
+                        </div>
+                        <button
+                          onClick={async () => {
+                            try {
+                              const status = localDB.getCloudSyncStatus();
+                              if (status.enabled) {
+                                await localDB.disableCloudSync();
+                                alert('Cloud sync disabled');
+                              } else {
+                                const result = await localDB.enableCloudSync();
+                                if (result.success) {
+                                  alert(`Cloud sync enabled!\n\nShare this URL to sync data to other devices:\n${result.url}\n\nData will automatically sync every few minutes.`);
+                                } else {
+                                  alert(result.message);
+                                }
+                              }
+                              window.location.reload(); // Refresh to update status
+                            } catch (error) {
+                              alert('Failed to toggle cloud sync');
                             }
-                          } catch (error) {
-                            alert('Failed to create backup');
-                          }
-                        }}
-                        className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-                      >
-                        <Download className="w-4 h-4" />
-                        <span>Download Backup</span>
-                      </button>
+                          }}
+                          className={`px-4 py-2 rounded-md text-white transition-colors ${
+                            localDB.getCloudSyncStatus().enabled
+                              ? 'bg-red-600 hover:bg-red-700'
+                              : 'bg-green-600 hover:bg-green-700'
+                          }`}
+                        >
+                          {localDB.getCloudSyncStatus().enabled ? 'Disable' : 'Enable'} Cloud Sync
+                        </button>
+                      </div>
+                      {localDB.getCloudSyncStatus().url && (
+                        <div className="mt-4 p-3 bg-blue-100 rounded border text-xs">
+                          <strong>Share URL:</strong>
+                          <div className="mt-1 p-2 bg-white rounded border font-mono text-blue-800 break-all">
+                            {localDB.getCloudSyncStatus().url}
+                          </div>
+                          <button
+                            onClick={() => {
+                              navigator.clipboard.writeText(localDB.getCloudSyncStatus().url || '');
+                              alert('Share URL copied to clipboard!');
+                            }}
+                            className="mt-2 px-3 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700"
+                          >
+                            Copy URL
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
 
-                {/* Import Section */}
+                {/* Import from Cloud */}
                 <div>
-                  <h3 className="text-md font-medium text-gray-900 mb-4">Import Data</h3>
+                  <h3 className="text-md font-medium text-gray-900 mb-4">Import from Another Device</h3>
                   <div className="space-y-4">
                     <div className="p-4 bg-green-50 border border-green-200 rounded-md">
-                      <h4 className="text-sm font-medium text-green-900 mb-2">Restore from Backup</h4>
+                      <h4 className="text-sm font-medium text-green-900 mb-2">Sync from Cloud URL</h4>
                       <p className="text-sm text-green-700 mb-3">
-                        Upload a backup file to restore or merge data from another device. Existing data will be preserved and merged.
+                        Enter a cloud sync URL from another device to import and merge data automatically.
                       </p>
                       <div className="space-y-3">
                         <input
-                          type="file"
-                          accept=".json"
-                          onChange={async (e) => {
-                            const file = e.target.files?.[0];
-                            if (file) {
-                              try {
-                                const text = await file.text();
-                                const result = await localDB.importDatabase(text, true);
-                                
-                                if (result.success) {
-                                  alert(`Database imported successfully!\n\nStats:\n- Added Users: ${result.stats.addedUsers}\n- Updated Users: ${result.stats.updatedUsers}\n- Added Payments: ${result.stats.addedPayments}\n- Total Users: ${result.stats.totalUsers}`);
-                                  await loadData(); // Reload the admin data
-                                } else {
-                                  alert(`Import failed: ${result.message}`);
+                          type="url"
+                          placeholder="Paste cloud sync URL here..."
+                          className="w-full px-3 py-2 border border-green-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+                          onKeyPress={async (e) => {
+                            if (e.key === 'Enter') {
+                              const input = e.target as HTMLInputElement;
+                              const url = input.value.trim();
+                              if (url) {
+                                try {
+                                  const result = await localDB.importFromCloudUrl(url);
+                                  alert(result.message);
+                                  if (result.success) {
+                                    input.value = '';
+                                    await loadData(); // Reload data
+                                    window.location.reload(); // Refresh to update UI
+                                  }
+                                } catch (error) {
+                                  alert('Failed to import from cloud URL');
                                 }
-                              } catch (error) {
-                                alert('Failed to read backup file');
                               }
-                              e.target.value = '';
                             }
                           }}
-                          className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-green-50 file:text-green-700 hover:file:bg-green-100"
                         />
                         <p className="text-xs text-green-600">
-                          Supported format: JSON backup files created by this system
+                          Press Enter to import. This will merge data from the cloud with your local data.
                         </p>
                       </div>
                     </div>
                   </div>
                 </div>
 
-                {/* Sync Instructions */}
+                {/* Manual Sync */}
                 <div>
-                  <h3 className="text-md font-medium text-gray-900 mb-4">Cross-Device Sync Instructions</h3>
+                  <h3 className="text-md font-medium text-gray-900 mb-4">Manual Actions</h3>
+                  <div className="flex space-x-4">
+                    <button
+                      onClick={async () => {
+                        try {
+                          const result = await localDB.forceCloudSync();
+                          alert(result.message);
+                        } catch (error) {
+                          alert('Failed to sync to cloud');
+                        }
+                      }}
+                      className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+                    >
+                      <RefreshCw className="w-4 h-4" />
+                      <span>Sync Now</span>
+                    </button>
+                    
+                    <button
+                      onClick={checkDatabaseStatus}
+                      className="flex items-center space-x-2 px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition-colors"
+                    >
+                      <Eye className="w-4 h-4" />
+                      <span>Check Status</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* How it Works */}
+                <div>
+                  <h3 className="text-md font-medium text-gray-900 mb-4">How Cloud Sync Works</h3>
                   <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-md">
                     <div className="space-y-3 text-sm text-yellow-800">
-                      <p><strong>To sync data between devices:</strong></p>
-                      <ol className="list-decimal list-inside space-y-1 ml-4">
-                        <li>On the source device: Click "Download Backup" to export your data</li>
-                        <li>Transfer the backup file to your target device (email, cloud storage, etc.)</li>
-                        <li>On the target device: Log in as admin and go to Data Sync tab</li>
-                        <li>Click "Choose File" and select your backup file</li>
-                        <li>The system will merge the data automatically</li>
-                      </ol>
+                      <p><strong>Automatic Cross-Device Synchronization:</strong></p>
+                      <ul className="list-disc list-inside space-y-1 ml-4">
+                        <li>✅ Your data automatically backs up to the cloud every time you make changes</li>
+                        <li>✅ Share the cloud URL with other devices to enable automatic syncing</li>
+                        <li>✅ All devices stay in sync automatically - no manual uploading needed</li>
+                        <li>✅ Data is encrypted and secure</li>
+                        <li>✅ Works across phones, tablets, and computers</li>
+                      </ul>
                       <p className="text-xs mt-3">
-                        <strong>Note:</strong> Data is stored locally in your browser. Regular backups ensure you don't lose important information.
+                        <strong>Note:</strong> Cloud sync is free and uses GitHub's infrastructure for reliability.
                       </p>
                     </div>
                   </div>

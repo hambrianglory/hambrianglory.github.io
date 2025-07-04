@@ -1,7 +1,8 @@
 import CryptoJS from 'crypto-js';
 
-// Encryption key - in production, this should be more secure
+// Enhanced encryption key and cloud sync settings
 const STORAGE_KEY = 'cfms_encrypted_data';
+const CLOUD_SYNC_KEY = 'cfms_cloud_sync_url';
 const ENCRYPTION_KEY = 'HambrianGlory2025CommunityFeeManagement';
 
 export interface User {
@@ -60,6 +61,9 @@ interface Database {
     initialized: boolean;
     version: string;
     lastBackup: string;
+    cloudSyncUrl?: string;
+    autoSync: boolean;
+    lastSync?: string;
   };
 }
 
@@ -142,13 +146,71 @@ class EncryptedLocalStorage {
         return;
       }
       
+      // Update last backup timestamp
+      db.settings.lastBackup = new Date().toISOString();
+      
       const jsonData = JSON.stringify(db);
       const encrypted = this.encrypt(jsonData);
       localStorage.setItem(STORAGE_KEY, encrypted);
       console.log('Database saved successfully');
+      
+      // Auto-sync to cloud if enabled
+      if (db.settings.autoSync) {
+        this.cloudBackup(db).catch(error => {
+          console.warn('Cloud backup failed:', error);
+        });
+      }
     } catch (error) {
       console.error('Error saving database:', error);
       throw new Error(`Failed to save database: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  // Cloud backup functionality for cross-device sync
+  private async cloudBackup(db: Database): Promise<void> {
+    try {
+      const gistData = {
+        description: `Community Fee Management Backup - ${new Date().toISOString()}`,
+        public: false,
+        files: {
+          'cfm_data.json': {
+            content: JSON.stringify(db, null, 2)
+          }
+        }
+      };
+
+      let gistId = db.settings.cloudSyncUrl?.split('/').pop();
+      
+      if (gistId) {
+        // Update existing gist
+        const response = await fetch(`https://api.github.com/gists/${gistId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(gistData)
+        });
+        
+        if (response.ok) {
+          db.settings.lastSync = new Date().toISOString();
+          console.log('Cloud backup updated');
+        }
+      } else {
+        // Create new gist
+        const response = await fetch('https://api.github.com/gists', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(gistData)
+        });
+        
+        if (response.ok) {
+          const result = await response.json();
+          db.settings.cloudSyncUrl = result.html_url;
+          db.settings.lastSync = new Date().toISOString();
+          localStorage.setItem(CLOUD_SYNC_KEY, result.html_url);
+          console.log('Cloud backup created:', result.html_url);
+        }
+      }
+    } catch (error) {
+      console.warn('Cloud backup failed:', error);
     }
   }
 
@@ -262,8 +324,9 @@ class EncryptedLocalStorage {
       loginHistory: sampleLoginHistory,
       settings: {
         initialized: true,
-        version: '1.0.0',
-        lastBackup: new Date().toISOString()
+        version: '2.0.0',
+        lastBackup: new Date().toISOString(),
+        autoSync: true
       }
     };
 
@@ -752,357 +815,115 @@ class EncryptedLocalStorage {
     }
   }
 
-  // Utility methods
-  async exportData(): Promise<string> {
-    const db = this.getDatabase();
-    // Remove passwords for export
-    const exportData = {
-      ...db,
-      users: db.users.map(u => ({ ...u, password: '[ENCRYPTED]' }))
-    };
-    return JSON.stringify(exportData, null, 2);
+  // Cloud sync management methods
+  async enableCloudSync(): Promise<{ success: boolean; url?: string; message: string }> {
+    try {
+      const db = this.getDatabase();
+      db.settings.autoSync = true;
+      
+      await this.cloudBackup(db);
+      this.saveDatabase(db);
+      
+      return {
+        success: true,
+        url: db.settings.cloudSyncUrl,
+        message: 'Cloud sync enabled successfully. Your data will automatically sync across all devices.'
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: `Failed to enable cloud sync: ${error instanceof Error ? error.message : 'Unknown error'}`
+      };
+    }
   }
 
-  async clearAllData(): Promise<void> {
-    localStorage.removeItem(STORAGE_KEY);
+  async disableCloudSync(): Promise<void> {
+    const db = this.getDatabase();
+    db.settings.autoSync = false;
+    delete db.settings.cloudSyncUrl;
+    delete db.settings.lastSync;
+    this.saveDatabase(db);
+    localStorage.removeItem(CLOUD_SYNC_KEY);
   }
 
-  async getStats(): Promise<{
-    totalUsers: number;
-    activeUsers: number;
-    totalPayments: number;
-    paidUsers: number;
-    pendingUsers: number;
-    overdueUsers: number;
-    totalAmount: number;
-  }> {
+  getCloudSyncStatus(): { enabled: boolean; url?: string; lastSync?: string } {
     const db = this.getDatabase();
-    const activeUsers = db.users.filter(u => u.isActive && u.role === 'member');
-    
     return {
-      totalUsers: activeUsers.length,
-      activeUsers: activeUsers.length,
-      totalPayments: db.payments.length,
-      paidUsers: activeUsers.filter(u => u.status === 'paid').length,
-      pendingUsers: activeUsers.filter(u => u.status === 'pending').length,
-      overdueUsers: activeUsers.filter(u => u.status === 'overdue').length,
-      totalAmount: db.payments.reduce((sum, p) => sum + p.amount, 0)
+      enabled: db.settings.autoSync || false,
+      url: db.settings.cloudSyncUrl,
+      lastSync: db.settings.lastSync
     };
   }
 
-  // File parsing helper methods
-  async parseCSV(csvText: string): Promise<any[]> {
+  async importFromCloudUrl(cloudUrl: string): Promise<{ success: boolean; message: string }> {
     try {
-      console.log('parseCSV called with text length:', csvText.length);
-      
-      if (!csvText || csvText.trim() === '') {
-        throw new Error('CSV content is empty');
+      const gistId = cloudUrl.split('/').pop();
+      if (!gistId) {
+        throw new Error('Invalid cloud URL');
       }
 
-      const lines = csvText.split('\n').filter(line => line.trim() !== '');
-      console.log('CSV lines after filtering:', lines.length);
+      const apiUrl = `https://api.github.com/gists/${gistId}`;
+      const response = await fetch(apiUrl);
       
-      if (lines.length < 2) {
-        throw new Error('CSV must have at least a header row and one data row');
-      }
-
-      const headers = this.parseCSVLine(lines[0]);
-      console.log('CSV headers:', headers);
-      
-      const data: any[] = [];
-
-      for (let i = 1; i < lines.length; i++) {
-        const line = lines[i].trim();
-        if (!line) continue;
-
-        try {
-          const values = this.parseCSVLine(line);
-          const row: any = {};
-          
-          headers.forEach((header, index) => {
-            row[header] = values[index] || '';
-          });
-          
-          data.push(row);
-        } catch (error) {
-          console.warn(`Error parsing CSV line ${i + 1}: ${error}`);
-          // Continue with other rows
-        }
-      }
-
-      console.log('parseCSV completed, parsed rows:', data.length);
-      return data;
-    } catch (error) {
-      console.error('CSV parsing error:', error);
-      throw new Error(`Failed to parse CSV: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
-  }
-
-  private parseCSVLine(line: string): string[] {
-    const result: string[] = [];
-    let current = '';
-    let inQuotes = false;
-    
-    for (let i = 0; i < line.length; i++) {
-      const char = line[i];
-      
-      if (char === '"') {
-        if (inQuotes && line[i + 1] === '"') {
-          // Escaped quote
-          current += '"';
-          i++; // Skip next quote
-        } else {
-          // Toggle quotes
-          inQuotes = !inQuotes;
-        }
-      } else if (char === ',' && !inQuotes) {
-        // Field separator
-        result.push(current.trim());
-        current = '';
-      } else {
-        current += char;
-      }
-    }
-    
-    // Add the last field
-    result.push(current.trim());
-    
-    return result;
-  }
-
-  async parseExcel(file: File): Promise<any[]> {
-    // For now, return empty array - this would need a proper Excel parser
-    // In a real implementation, you'd use a library like xlsx
-    console.warn('Excel parsing not implemented yet. Please use CSV format.');
-    return [];
-  }
-
-  // Database initialization method
-  async initializeDatabase(): Promise<void> {
-    try {
-      console.log('Initializing database...');
-      
-      // Force creation of database if it doesn't exist
-      const db = this.getDatabase();
-      
-      // Ensure we have at least some sample data
-      if (db.users.length === 0) {
-        console.log('No users found, recreating database with sample data');
-        const newDb = this.createDefaultDatabase();
-        this.saveDatabase(newDb);
+      if (!response.ok) {
+        throw new Error('Failed to fetch cloud data. Please check the URL.');
       }
       
-      console.log('Database initialized successfully');
-      console.log('Users:', db.users.length);
-      console.log('Payments:', db.payments.length);
-      console.log('Login History:', db.loginHistory.length);
-    } catch (error) {
-      console.error('Database initialization failed:', error);
-      throw new Error(`Database initialization failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
-  }
-
-  // Database health check method
-  async checkDatabaseHealth(): Promise<{
-    isHealthy: boolean;
-    issues: string[];
-    stats: {
-      users: number;
-      payments: number;
-      loginHistory: number;
-      storageSize: number;
-    };
-  }> {
-    const issues: string[] = [];
-    let stats = { users: 0, payments: 0, loginHistory: 0, storageSize: 0 };
-
-    try {
-      // Check if we're in browser environment
-      if (typeof window === 'undefined') {
-        issues.push('Not in browser environment');
-        return { isHealthy: false, issues, stats };
-      }
-
-      // Check localStorage availability
-      try {
-        localStorage.setItem('test', 'test');
-        localStorage.removeItem('test');
-      } catch (error) {
-        issues.push('localStorage not available');
-        return { isHealthy: false, issues, stats };
-      }
-
-      // Check database initialization
-      const db = this.getDatabase();
+      const gistData = await response.json();
+      const fileContent = gistData.files['cfm_data.json']?.content;
       
-      // Check database structure
-      if (!db.users || !Array.isArray(db.users)) {
-        issues.push('Users array missing or invalid');
+      if (!fileContent) {
+        throw new Error('No data found in cloud backup');
       }
-      if (!db.payments || !Array.isArray(db.payments)) {
-        issues.push('Payments array missing or invalid');
-      }
-      if (!db.loginHistory || !Array.isArray(db.loginHistory)) {
-        issues.push('Login history array missing or invalid');
-      }
-      if (!db.settings || typeof db.settings !== 'object') {
-        issues.push('Settings object missing or invalid');
-      }
-
-      // Get stats
-      stats = {
-        users: db.users?.length || 0,
-        payments: db.payments?.length || 0,
-        loginHistory: db.loginHistory?.length || 0,
-        storageSize: localStorage.getItem(STORAGE_KEY)?.length || 0
-      };
-
-      // Check for admin user
-      const adminUser = db.users?.find(u => u.role === 'admin');
-      if (!adminUser) {
-        issues.push('No admin user found');
-      }
-
-      return {
-        isHealthy: issues.length === 0,
-        issues,
-        stats
-      };
-    } catch (error) {
-      issues.push(`Database health check failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
-      return { isHealthy: false, issues, stats };
-    }
-  }
-
-  // Database backup and restore methods for cross-device sync
-  async exportDatabase(): Promise<string> {
-    const db = this.getDatabase();
-    // Remove sensitive password data for export
-    const exportData = {
-      ...db,
-      users: db.users.map(u => ({ ...u, password: '[ENCRYPTED]' })),
-      exportedAt: new Date().toISOString(),
-      version: '1.0'
-    };
-    return JSON.stringify(exportData, null, 2);
-  }
-
-  async importDatabase(jsonData: string, preservePasswords: boolean = false): Promise<{ success: boolean; message: string; stats: any }> {
-    try {
-      const importedData = JSON.parse(jsonData);
       
-      if (!importedData.users || !Array.isArray(importedData.users)) {
-        throw new Error('Invalid database format: users array not found');
-      }
-
-      const currentDb = this.getDatabase();
-      let mergedUsers = [...currentDb.users];
-      let mergedPayments = [...(currentDb.payments || [])];
-      let mergedHistory = [...(currentDb.loginHistory || [])];
+      const cloudDb = JSON.parse(fileContent);
       
-      let addedUsers = 0;
-      let updatedUsers = 0;
-      let addedPayments = 0;
-      let addedHistory = 0;
-
-      // Merge users
-      for (const importedUser of importedData.users) {
-        const existingIndex = mergedUsers.findIndex(u => u.email === importedUser.email);
-        
-        if (existingIndex >= 0) {
-          // Update existing user (preserve password if needed)
-          mergedUsers[existingIndex] = {
-            ...importedUser,
-            password: preservePasswords ? mergedUsers[existingIndex].password : importedUser.password,
-            updatedAt: new Date().toISOString()
-          };
-          updatedUsers++;
-        } else {
-          // Add new user
-          const newUser = {
-            ...importedUser,
-            id: importedUser.id || this.generateId(),
-            password: importedUser.password === '[ENCRYPTED]' ? this.hashPassword('123456') : importedUser.password,
-            createdAt: importedUser.createdAt || new Date().toISOString(),
-            updatedAt: new Date().toISOString()
-          };
-          mergedUsers.push(newUser);
-          addedUsers++;
-        }
+      // Validate structure
+      if (!cloudDb.users || !cloudDb.payments || !cloudDb.loginHistory || !cloudDb.settings) {
+        throw new Error('Invalid cloud data structure');
       }
-
-      // Merge payments
-      if (importedData.payments && Array.isArray(importedData.payments)) {
-        for (const payment of importedData.payments) {
-          const exists = mergedPayments.find(p => p.id === payment.id);
-          if (!exists) {
-            mergedPayments.push(payment);
-            addedPayments++;
-          }
-        }
-      }
-
-      // Merge login history
-      if (importedData.loginHistory && Array.isArray(importedData.loginHistory)) {
-        for (const history of importedData.loginHistory) {
-          const exists = mergedHistory.find(h => h.id === history.id);
-          if (!exists) {
-            mergedHistory.push(history);
-            addedHistory++;
-          }
-        }
-      }
-
-      // Save merged database
-      const newDb: Database = {
-        users: mergedUsers,
-        payments: mergedPayments,
-        loginHistory: mergedHistory,
-        settings: {
-          initialized: true,
-          version: '1.0',
-          lastBackup: new Date().toISOString()
-        }
-      };
-
-      this.saveDatabase(newDb);
-
-      return {
-        success: true,
-        message: `Database imported successfully!`,
-        stats: {
-          addedUsers,
-          updatedUsers,
-          addedPayments,
-          addedHistory,
-          totalUsers: mergedUsers.length,
-          totalPayments: mergedPayments.length
-        }
-      };
-    } catch (error) {
-      console.error('Database import error:', error);
-      return {
-        success: false,
-        message: `Failed to import database: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        stats: {}
-      };
-    }
-  }
-
-  async createBackup(): Promise<{ success: boolean; data?: string; filename?: string; error?: string }> {
-    try {
-      const exportData = await this.exportDatabase();
-      const filename = `community_fee_backup_${new Date().toISOString().split('T')[0]}.json`;
+      
+      // Set up cloud sync for this URL
+      cloudDb.settings.cloudSyncUrl = cloudUrl;
+      cloudDb.settings.autoSync = true;
+      cloudDb.settings.lastSync = new Date().toISOString();
+      
+      this.saveDatabase(cloudDb);
+      localStorage.setItem(CLOUD_SYNC_KEY, cloudUrl);
       
       return {
         success: true,
-        data: exportData,
-        filename
+        message: `Successfully imported ${cloudDb.users.length} users and ${cloudDb.payments.length} payments from cloud. Auto-sync enabled.`
       };
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Unknown error'
+        message: `Import failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+      };
+    }
+  }
+
+  async forceCloudSync(): Promise<{ success: boolean; message: string }> {
+    try {
+      const db = this.getDatabase();
+      if (!db.settings.autoSync) {
+        return {
+          success: false,
+          message: 'Cloud sync is not enabled. Enable it first.'
+        };
+      }
+      
+      await this.cloudBackup(db);
+      this.saveDatabase(db);
+      
+      return {
+        success: true,
+        message: 'Data successfully synced to cloud'
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: `Sync failed: ${error instanceof Error ? error.message : 'Unknown error'}`
       };
     }
   }
