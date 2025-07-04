@@ -8,7 +8,7 @@ The CSV export headers in the admin dashboard did not match the CSV import templ
 ### 1. Fixed CSV Export Headers
 **File:** `src/app/admin/page.tsx`
 - **Before:** `Name,Email,Phone,NIC,Date of Birth,Address,House Number,Role,Amount,Status,Payment Date,Membership Date`
-- **After:** `id,name,email,phone,nicNumber,dateOfBirth,address,role,houseNumber,membershipDate,isActive`
+- **After:** `id,name,email,phone,nicNumber,dateOfBirth,addr ess,role,houseNumber,membershipDate,isActive`
 
 ### 2. Fixed CSV Export Data Order
 Updated the export data to match the new headers and include all fields required by the import function.

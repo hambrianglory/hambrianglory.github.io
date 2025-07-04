@@ -22,6 +22,9 @@ export interface User {
   profilePicture?: string;
   lastLogin?: string;
   isActive: boolean;
+  isLocked?: boolean;
+  failedLoginAttempts?: number;
+  lockoutUntil?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -279,30 +282,89 @@ class EncryptedLocalStorage {
   // User methods
   async authenticateUser(email: string, password: string): Promise<User | null> {
     const db = this.getDatabase();
-    const hashedPassword = this.hashPassword(password);
-    const user = db.users.find(u => u.email === email && u.password === hashedPassword && u.isActive);
+    const user = db.users.find(u => u.email === email && u.isActive);
     
-    // Log login attempt
+    // Check if user exists
+    if (!user) {
+      this.logLoginAttempt(db, email, 'unknown', false, 'User not found');
+      return null;
+    }
+    
+    // Check if account is locked
+    if (user.isLocked || (user.lockoutUntil && new Date(user.lockoutUntil) > new Date())) {
+      this.logLoginAttempt(db, email, user.id, false, 'Account locked');
+      return null;
+    }
+    
+    const hashedPassword = this.hashPassword(password);
+    const isValidPassword = user.password === hashedPassword;
+    
+    if (isValidPassword) {
+      // Reset failed login attempts on successful login
+      user.failedLoginAttempts = 0;
+      user.isLocked = false;
+      user.lockoutUntil = undefined;
+      user.lastLogin = new Date().toISOString();
+      user.updatedAt = new Date().toISOString();
+      
+      this.logLoginAttempt(db, email, user.id, true);
+      this.saveDatabase(db);
+      return user;
+    } else {
+      // Handle failed login attempt
+      user.failedLoginAttempts = (user.failedLoginAttempts || 0) + 1;
+      
+      // Lock account after 5 failed attempts
+      if (user.failedLoginAttempts >= 5) {
+        user.isLocked = true;
+        user.lockoutUntil = new Date(Date.now() + 30 * 60 * 1000).toISOString(); // 30 minutes
+      }
+      
+      user.updatedAt = new Date().toISOString();
+      this.logLoginAttempt(db, email, user.id, false, `Invalid password (${user.failedLoginAttempts} attempts)`);
+      this.saveDatabase(db);
+      return null;
+    }
+  }
+
+  private logLoginAttempt(db: Database, email: string, userId: string, success: boolean, failureReason?: string): void {
     const loginRecord: LoginHistory = {
       id: this.generateId(),
-      userId: user?.id || 'unknown',
+      userId,
       email,
       timestamp: new Date().toISOString(),
       ip: 'localhost',
-      userAgent: navigator.userAgent,
-      success: !!user,
-      failureReason: user ? undefined : 'Invalid credentials'
+      userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'Server',
+      success,
+      failureReason
     };
     
     db.loginHistory.push(loginRecord);
+  }
+
+  async unlockUser(userId: string): Promise<boolean> {
+    const db = this.getDatabase();
+    const user = db.users.find(u => u.id === userId);
     
-    if (user) {
-      user.lastLogin = new Date().toISOString();
-      user.updatedAt = new Date().toISOString();
-    }
+    if (!user) return false;
+    
+    user.isLocked = false;
+    user.failedLoginAttempts = 0;
+    user.lockoutUntil = undefined;
+    user.updatedAt = new Date().toISOString();
     
     this.saveDatabase(db);
-    return user || null;
+    return true;
+  }
+
+  async getLockedUsers(): Promise<User[]> {
+    const db = this.getDatabase();
+    return db.users.filter(u => 
+      u.isActive && (
+        u.isLocked || 
+        (u.lockoutUntil && new Date(u.lockoutUntil) > new Date())
+      )
+    );
   }
 
   async createUser(userData: Omit<User, 'id' | 'createdAt' | 'updatedAt'>): Promise<User> {
@@ -313,6 +375,28 @@ class EncryptedLocalStorage {
       password: this.hashPassword(userData.password),
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
+    };
+    
+    db.users.push(newUser);
+    this.saveDatabase(db);
+    return newUser;
+  }
+
+  async addUser(userData: User): Promise<User> {
+    const db = this.getDatabase();
+    
+    // Check if user with same email already exists
+    const existingUser = db.users.find(u => u.email === userData.email);
+    if (existingUser) {
+      throw new Error('User with this email already exists');
+    }
+    
+    const newUser: User = {
+      ...userData,
+      id: userData.id || this.generateId(),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      isActive: true
     };
     
     db.users.push(newUser);
@@ -887,6 +971,139 @@ class EncryptedLocalStorage {
     } catch (error) {
       issues.push(`Database health check failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
       return { isHealthy: false, issues, stats };
+    }
+  }
+
+  // Database backup and restore methods for cross-device sync
+  async exportDatabase(): Promise<string> {
+    const db = this.getDatabase();
+    // Remove sensitive password data for export
+    const exportData = {
+      ...db,
+      users: db.users.map(u => ({ ...u, password: '[ENCRYPTED]' })),
+      exportedAt: new Date().toISOString(),
+      version: '1.0'
+    };
+    return JSON.stringify(exportData, null, 2);
+  }
+
+  async importDatabase(jsonData: string, preservePasswords: boolean = false): Promise<{ success: boolean; message: string; stats: any }> {
+    try {
+      const importedData = JSON.parse(jsonData);
+      
+      if (!importedData.users || !Array.isArray(importedData.users)) {
+        throw new Error('Invalid database format: users array not found');
+      }
+
+      const currentDb = this.getDatabase();
+      let mergedUsers = [...currentDb.users];
+      let mergedPayments = [...(currentDb.payments || [])];
+      let mergedHistory = [...(currentDb.loginHistory || [])];
+      
+      let addedUsers = 0;
+      let updatedUsers = 0;
+      let addedPayments = 0;
+      let addedHistory = 0;
+
+      // Merge users
+      for (const importedUser of importedData.users) {
+        const existingIndex = mergedUsers.findIndex(u => u.email === importedUser.email);
+        
+        if (existingIndex >= 0) {
+          // Update existing user (preserve password if needed)
+          mergedUsers[existingIndex] = {
+            ...importedUser,
+            password: preservePasswords ? mergedUsers[existingIndex].password : importedUser.password,
+            updatedAt: new Date().toISOString()
+          };
+          updatedUsers++;
+        } else {
+          // Add new user
+          const newUser = {
+            ...importedUser,
+            id: importedUser.id || this.generateId(),
+            password: importedUser.password === '[ENCRYPTED]' ? this.hashPassword('123456') : importedUser.password,
+            createdAt: importedUser.createdAt || new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          };
+          mergedUsers.push(newUser);
+          addedUsers++;
+        }
+      }
+
+      // Merge payments
+      if (importedData.payments && Array.isArray(importedData.payments)) {
+        for (const payment of importedData.payments) {
+          const exists = mergedPayments.find(p => p.id === payment.id);
+          if (!exists) {
+            mergedPayments.push(payment);
+            addedPayments++;
+          }
+        }
+      }
+
+      // Merge login history
+      if (importedData.loginHistory && Array.isArray(importedData.loginHistory)) {
+        for (const history of importedData.loginHistory) {
+          const exists = mergedHistory.find(h => h.id === history.id);
+          if (!exists) {
+            mergedHistory.push(history);
+            addedHistory++;
+          }
+        }
+      }
+
+      // Save merged database
+      const newDb: Database = {
+        users: mergedUsers,
+        payments: mergedPayments,
+        loginHistory: mergedHistory,
+        settings: {
+          initialized: true,
+          version: '1.0',
+          lastBackup: new Date().toISOString()
+        }
+      };
+
+      this.saveDatabase(newDb);
+
+      return {
+        success: true,
+        message: `Database imported successfully!`,
+        stats: {
+          addedUsers,
+          updatedUsers,
+          addedPayments,
+          addedHistory,
+          totalUsers: mergedUsers.length,
+          totalPayments: mergedPayments.length
+        }
+      };
+    } catch (error) {
+      console.error('Database import error:', error);
+      return {
+        success: false,
+        message: `Failed to import database: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        stats: {}
+      };
+    }
+  }
+
+  async createBackup(): Promise<{ success: boolean; data?: string; filename?: string; error?: string }> {
+    try {
+      const exportData = await this.exportDatabase();
+      const filename = `community_fee_backup_${new Date().toISOString().split('T')[0]}.json`;
+      
+      return {
+        success: true,
+        data: exportData,
+        filename
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
     }
   }
 }
