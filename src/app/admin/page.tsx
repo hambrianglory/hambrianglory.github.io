@@ -464,7 +464,7 @@ Health Check: ${healthCheck.isHealthy ? 'HEALTHY' : 'ISSUES FOUND'}`;
           <h1 className="text-xl sm:text-2xl font-bold text-gray-900 mb-2">
             Community Management Dashboard
           </h1>
-          <p className="text-sm sm:text-base text-gray-600">Manage members, payments, and community operations.</p>
+          <p className="text-sm sm:text-base text-gray-600">Manage members, payments, and community operations efficiently.</p>
         </div>
 
         {/* Tabs Navigation */}
