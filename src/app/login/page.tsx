@@ -1,12 +1,10 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { LogIn, Eye, EyeOff, AlertCircle, Key, CheckCircle } from 'lucide-react';
-import { LOGO_PATH } from '@/lib/assets';
-import { localDB } from '@/lib/localDatabase';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -22,49 +20,40 @@ export default function LoginPage() {
   const [passwordChangeSuccess, setPasswordChangeSuccess] = useState(false);
   const router = useRouter();
 
-  useEffect(() => {
-    // Initialize local database when component loads
-    const initDB = async () => {
-      try {
-        // This will create the default database if it doesn't exist
-        await localDB.getAllUsers();
-        console.log('Local database initialized successfully');
-      } catch (error) {
-        console.error('Failed to initialize local database:', error);
-      }
-    };
-    
-    initDB();
-  }, []);
-
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError('');
 
     try {
-      const user = await localDB.authenticateUser(email, password);
-      
-      if (user) {
-        // Create a session token (simple string for demo)
-        const sessionToken = `session_${user.id}_${Date.now()}`;
-        
-        // Store user session
-        localStorage.setItem('token', sessionToken);
-        localStorage.setItem('user', JSON.stringify(user));
-        
-        // Redirect based on role
-        if (user.role === 'admin') {
-          router.push('/admin');
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email, password }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        if (data.requiresPasswordChange) {
+          setRequiresPasswordChange(true);
+          setError('You are using a temporary password. Please change it to continue.');
         } else {
-          router.push('/dashboard');
+          localStorage.setItem('token', data.token);
+          localStorage.setItem('user', JSON.stringify(data.user));
+          if (data.user.role === 'admin') {
+            router.push('/admin');
+          } else {
+            router.push('/dashboard');
+          }
         }
       } else {
-        setError('Invalid email or password. Please try again.');
+        setError(data.message || 'Login failed');
       }
     } catch (error) {
-      console.error('Login error:', error);
-      setError('Login failed. Please try again.');
+      setError('Network error. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -94,13 +83,22 @@ export default function LoginPage() {
     }
 
     try {
-      // First authenticate with current password
-      const user = await localDB.authenticateUser(email, password);
-      
-      if (user) {
-        // Update password
-        await localDB.updateUser(user.id, { password: newPassword });
-        
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email,
+          oldPassword: password,
+          newPassword,
+          isChangePassword: true
+        }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
         setPasswordChangeSuccess(true);
         setError('');
         setTimeout(() => {
@@ -112,11 +110,10 @@ export default function LoginPage() {
           handleLoginAfterPasswordChange();
         }, 2000);
       } else {
-        setError('Current password is incorrect');
+        setError(data.message || 'Failed to change password');
       }
     } catch (error) {
-      console.error('Password change error:', error);
-      setError('Failed to change password. Please try again.');
+      setError('Network error. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -124,18 +121,20 @@ export default function LoginPage() {
 
   const handleLoginAfterPasswordChange = async () => {
     try {
-      const user = await localDB.authenticateUser(email, newPassword);
-      
-      if (user) {
-        // Create a session token (simple string for demo)
-        const sessionToken = `session_${user.id}_${Date.now()}`;
-        
-        // Store user session
-        localStorage.setItem('token', sessionToken);
-        localStorage.setItem('user', JSON.stringify(user));
-        
-        // Redirect based on role
-        if (user.role === 'admin') {
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email, password: newPassword }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        localStorage.setItem('token', data.token);
+        localStorage.setItem('user', JSON.stringify(data.user));
+        if (data.user.role === 'admin') {
           router.push('/admin');
         } else {
           router.push('/dashboard');
@@ -154,7 +153,7 @@ export default function LoginPage() {
           <Link href="/" className="inline-flex items-center space-x-2 sm:space-x-3 mb-6 sm:mb-8">
             <div className="w-12 h-12 sm:w-16 sm:h-16 relative bg-gradient-to-br from-blue-50 to-white rounded-2xl p-2 shadow-lg border border-blue-100">
               <Image
-                src={LOGO_PATH}
+                src="/logo.png"
                 alt="Hambrian Glory Logo"
                 width={48}
                 height={48}

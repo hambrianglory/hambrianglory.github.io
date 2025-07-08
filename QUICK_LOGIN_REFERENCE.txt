@@ -1,0 +1,28 @@
+┌─────────────────────────────────────────────────────────────┐
+│                    🔐 ADMIN LOGIN CREDENTIALS                   │
+│                     Hambrian Glory Community                    │
+└─────────────────────────────────────────────────────────────┘
+
+📧 ADMIN ACCOUNT:
+   • admin@hambrianglory.lk   → admin123
+
+🏠 MEMBER ACCESS:
+   • Members are added via Excel upload or admin panel
+   • Contact administrator for login credentials
+   • No demo member accounts available
+
+🔒 SECURITY:
+   • Only one admin login for security
+   • Clean slate - no demo data
+   • Production-ready setup
+
+🌐 ACCESS:
+   http://localhost:3002/login
+
+🌟 ADMIN FEATURES:
+   ✓ Member management (add/edit/delete/search)
+   ✓ Excel/CSV upload for bulk data import
+   ✓ WhatsApp integration (messages, reminders)
+   ✓ Payment tracking and overdue management
+   ✓ Community statistics and reporting
+   ✓ Template downloads (users/payments)

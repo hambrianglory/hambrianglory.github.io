@@ -1,0 +1,3 @@
+id,userId,amount,paymentDate,paymentType,description,status,quarter,year,method,receiptNumber
+"payment_001","user_001","50000","2025-03-31","quarterly_sanda_fee","Q1 2025 Annual Sanda Fee","completed","Q1","2025","cash","RCP001"
+"payment_002","user_001","50000","2025-06-30","quarterly_sanda_fee","Q2 2025 Annual Sanda Fee","pending","Q2","2025","bank_transfer",""

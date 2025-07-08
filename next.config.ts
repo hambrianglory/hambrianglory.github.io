@@ -1,35 +1,22 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // GitHub Pages configuration
-  output: 'export',
-  trailingSlash: true,
-  images: {
-    unoptimized: true
-  },
-  // Only use basePath in production
-  basePath: process.env.NODE_ENV === 'production' ? '/community-fee-management' : '',
-  assetPrefix: process.env.NODE_ENV === 'production' ? '/community-fee-management/' : '',
-  
-  // Environment configuration
-  env: {
-    DEMO_MODE: 'true'
-  },
-  
-  // Disable strict linting for build
   eslint: {
+    // Disable ESLint during builds for deployment
     ignoreDuringBuilds: true,
   },
-  
-  // Disable TypeScript strict checks for build
   typescript: {
+    // Disable TypeScript errors during builds for deployment
     ignoreBuildErrors: true,
   },
-  
-  // Exclude API routes from static export
-  generateBuildId: async () => {
-    return 'community-fee-management-build'
-  }
+  images: {
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: '**',
+      },
+    ],
+  },
 };
 
 export default nextConfig;

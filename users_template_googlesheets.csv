@@ -1,0 +1,2 @@
+id,name,email,phone,nicNumber,dateOfBirth,address,role,houseNumber,membershipDate,isActive
+"user_001","John Doe","john@example.com","+94112345678","199012345678","1990-03-22","123 Galle Road, Colombo 03","member","A-101","2024-01-01","true"

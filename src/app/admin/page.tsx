@@ -4,10 +4,9 @@ import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
-import { User } from '@/lib/localDatabase';
-import { localDB } from '@/lib/localDatabase';
-import { logout } from '@/lib/auth';
-import { LOGO_PATH } from '@/lib/assets';
+import { User } from '@/types';
+import WhatsAppComponent from '@/components/WhatsAppComponent';
+import ProfilePicture from '@/components/ProfilePicture';
 import {
   Home,
   Users,
@@ -70,25 +69,21 @@ export default function AdminDashboard() {
     isActive: true
   });
   
+  // Account Management State
+  const [accountIssues, setAccountIssues] = useState<any[]>([]);
+  const [filteredAccountIssues, setFilteredAccountIssues] = useState<any[]>([]);
+  const [accountSearchTerm, setAccountSearchTerm] = useState('');
+  const [accountLoading, setAccountLoading] = useState(false);
+  const [selectedAccount, setSelectedAccount] = useState<string | null>(null);
+  
   // Login History State
   const [loginHistory, setLoginHistory] = useState<any[]>([]);
   const [loginStats, setLoginStats] = useState<any>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyDays, setHistoryDays] = useState(7);
   const [historyRoleFilter, setHistoryRoleFilter] = useState('all');
-  
-  // User Management State
-  const [selectedUsers, setSelectedUsers] = useState<string[]>([]);
-  const [selectAll, setSelectAll] = useState(false);
-  
-  // Account Management State
-  const [lockedUsers, setLockedUsers] = useState<string[]>([]);
-  const [whatsappSettings, setWhatsappSettings] = useState({
-    enabled: false,
-    apiKey: '',
-    phoneNumber: '',
-    template: 'Hello {name}, your payment of LKR {amount} is due.'
-  });
+  const [historyOffset, setHistoryOffset] = useState(0);
+  const [historyHasMore, setHistoryHasMore] = useState(false);
   
   const router = useRouter();
 
@@ -101,7 +96,7 @@ export default function AdminDashboard() {
         member.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         member.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
         member.phone.includes(searchTerm) ||
-        (member.nicNumber && member.nicNumber.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        member.nicNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (member.houseNumber && member.houseNumber.toLowerCase().includes(searchTerm.toLowerCase())) ||
         member.role.toLowerCase().includes(searchTerm.toLowerCase())
       );
@@ -109,70 +104,64 @@ export default function AdminDashboard() {
     }
   }, [members, searchTerm]);
 
+  // Filter account issues based on search term
+  useEffect(() => {
+    if (!accountSearchTerm.trim()) {
+      setFilteredAccountIssues(accountIssues);
+    } else {
+      const filtered = accountIssues.filter(issue =>
+        issue.userId.toLowerCase().includes(accountSearchTerm.toLowerCase()) ||
+        (issue.user && (
+          issue.user.name.toLowerCase().includes(accountSearchTerm.toLowerCase()) ||
+          issue.user.email.toLowerCase().includes(accountSearchTerm.toLowerCase())
+        ))
+      );
+      setFilteredAccountIssues(filtered);
+    }
+  }, [accountIssues, accountSearchTerm]);
+
   const loadData = useCallback(async () => {
     try {
-      console.log('Loading admin data...');
+      // Fetch users from API
+      const response = await fetch('/api/users');
+      if (response.ok) {
+        const data = await response.json();
+        const loadedMembers = data.users || [];
+        setMembers(loadedMembers);
+        setFilteredMembers(loadedMembers);
+        
+        // Update stats with actual member count
+        const mockStats = {
+          totalMembers: loadedMembers.length,
+          totalCollected: 1200000,
+          pendingPayments: 180000,
+          totalExpenses: 750000,
+          communityBalance: 450000
+        };
+        setStats(mockStats);
+      } else {
+        console.error('Failed to fetch users');
+        setMembers([]);
+        setFilteredMembers([]);
+        // Keep stats with 0 members if API fails
+        const mockStats = {
+          totalMembers: 0,
+          totalCollected: 1200000,
+          pendingPayments: 180000,
+          totalExpenses: 750000,
+          communityBalance: 450000
+        };
+        setStats(mockStats);
+      }
       
-      // Initialize database first
-      console.log('Initializing database...');
-      await localDB.initializeDatabase();
-      
-      console.log('Loading users...');
-      const allUsers = await localDB.getAllUsers();
-      console.log('Users loaded:', allUsers.length);
-      
-      setMembers(allUsers);
-      setFilteredMembers(allUsers);
-      
-      console.log('Loading locked users...');
-      const locked = await localDB.getLockedUsers();
-      console.log('Locked users:', locked.length);
-      setLockedUsers(locked.map(u => u.id));
-      
-      console.log('Loading statistics...');
-      const dbStats = await localDB.getStats();
-      console.log('Stats loaded:', dbStats);
-      
-      setStats({
-        totalMembers: dbStats.totalUsers,
-        totalCollected: dbStats.totalAmount,
-        pendingPayments: dbStats.pendingUsers,
-        totalExpenses: 0,
-        communityBalance: dbStats.totalAmount
-      });
-      
-      console.log('Admin data loaded successfully');
       setLoading(false);
     } catch (error) {
-      console.error('Error loading admin data:', error);
-      alert(`Failed to load admin data: ${error instanceof Error ? error.message : 'Unknown error'}. Check the browser console for details.`);
+      console.error('Error loading data:', error);
+      setMembers([]);
+      setFilteredMembers([]);
       setLoading(false);
     }
   }, []);
-
-  // Load login history
-  const loadLoginHistory = async () => {
-    setHistoryLoading(true);
-    try {
-      console.log('Loading login history...');
-      console.log('Days:', historyDays, 'Role filter:', historyRoleFilter);
-      
-      const result = await localDB.getLoginHistoryWithStats(historyDays, historyRoleFilter, 50, 0);
-      console.log('Login history result:', result);
-      
-      setLoginHistory(result.history || []);
-      setLoginStats(result.stats);
-      
-      console.log('Login history loaded successfully');
-    } catch (error) {
-      console.error('Error loading login history:', error);
-      alert(`Failed to load login history: ${error instanceof Error ? error.message : 'Unknown error'}`);
-      setLoginHistory([]);
-      setLoginStats(null);
-    } finally {
-      setHistoryLoading(false);
-    }
-  };
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -181,68 +170,30 @@ export default function AdminDashboard() {
       return;
     }
 
+    // Load initial data
     loadData();
   }, [router, loadData]);
 
-  useEffect(() => {
-    if (activeTab === 'loginHistory') {
-      loadLoginHistory();
-    }
-  }, [activeTab, historyDays, historyRoleFilter]);
-
-  const handleLogout = () => {
-    logout();
-  };
-
-  const checkDatabaseStatus = async () => {
+  const handleLogout = async () => {
     try {
-      console.log('=== DATABASE STATUS CHECK ===');
-      
-      // Run health check
-      const healthCheck = await localDB.checkDatabaseHealth();
-      console.log('Health check result:', healthCheck);
-      
-      // Check localStorage
-      const storageData = localStorage.getItem('cfms_encrypted_data');
-      console.log('LocalStorage data exists:', !!storageData);
-      console.log('Storage data length:', storageData?.length || 0);
-      
-      // Check database contents
-      const users = await localDB.getAllUsers();
-      const payments = await localDB.getAllPayments();
-      const loginHistory = await localDB.getLoginHistory();
-      const stats = await localDB.getStats();
-      
-      console.log('Users count:', users.length);
-      console.log('Payments count:', payments.length);
-      console.log('Login history count:', loginHistory.length);
-      console.log('Stats:', stats);
-      
-      // Check sample data
-      const adminUser = users.find(u => u.role === 'admin');
-      console.log('Admin user exists:', !!adminUser);
-      console.log('Admin email:', adminUser?.email);
-      
-      let alertMessage = `Database Status:
-Users: ${users.length}
-Payments: ${payments.length}
-Login History: ${loginHistory.length}
-Admin User: ${adminUser ? 'Found' : 'Missing'}
-Storage Size: ${(storageData?.length || 0)} bytes
-
-Health Check: ${healthCheck.isHealthy ? 'HEALTHY' : 'ISSUES FOUND'}`;
-
-      if (!healthCheck.isHealthy) {
-        alertMessage += `\n\nIssues:\n${healthCheck.issues.join('\n')}`;
+      // Record logout in history
+      const token = localStorage.getItem('token');
+      if (token) {
+        await fetch('/api/admin/login-history', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ action: 'logout' })
+        });
       }
-
-      alertMessage += '\n\nCheck the browser console for detailed information.';
-      
-      alert(alertMessage);
-      
     } catch (error) {
-      console.error('Database status check failed:', error);
-      alert(`Database check failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      console.error('Error recording logout:', error);
+    } finally {
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      router.push('/');
     }
   };
 
@@ -251,150 +202,710 @@ Health Check: ${healthCheck.isHealthy ? 'HEALTHY' : 'ISSUES FOUND'}`;
     if (!file) return;
 
     const fileExtension = file.name.split('.').pop()?.toLowerCase();
-    if (fileExtension !== 'csv') {
-      alert('Please upload a valid CSV file.');
+    const supportedFormats = ['xlsx', 'xls', 'csv'];
+    
+    if (!supportedFormats.includes(fileExtension || '')) {
+      alert('Please upload a valid Excel (.xlsx, .xls) or CSV file.');
       return;
     }
 
     setLoading(true);
     try {
-      console.log(`Uploading ${type} file:`, file.name);
-      const fileContent = await file.text();
-      console.log('File content length:', fileContent.length);
-      
-      if (type.toLowerCase() === 'users') {
-        console.log('Parsing users CSV...');
-        const userData = await localDB.parseCSV(fileContent);
-        console.log('Parsed users data:', userData.length, 'records');
-        console.log('Sample user data:', userData[0]);
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('type', type.toLowerCase());
+
+      const response = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const result = await response.json();
+
+      if (response.ok) {
+        const { results } = result;
+        const formatType = fileExtension === 'csv' ? 'Google Sheets (CSV)' : 'Excel';
         
-        console.log('Importing users...');
-        const results = await localDB.importUsers(userData);
-        console.log('Import results:', results);
+        let successMessage = `${type} ${formatType} file processed successfully!\n\n`;
+        successMessage += `📊 Processing Summary:\n`;
+        successMessage += `• Total Processed: ${results.totalProcessed}\n`;
+        successMessage += `• Added: ${results.added}\n`;
+        successMessage += `• Updated: ${results.updated}\n`;
         
-        let message = `Users imported successfully!\n`;
-        message += `Added: ${results.added}, Updated: ${results.updated}\n`;
-        if (results.errors.length > 0) {
-          message += `Errors: ${results.errors.length}\n${results.errors.slice(0, 5).join('\n')}`;
-          if (results.errors.length > 5) {
-            message += `\n... and ${results.errors.length - 5} more errors`;
-          }
+        if (results.errors && results.errors.length > 0) {
+          successMessage += `• Errors: ${results.errors.length}\n\n`;
+          successMessage += `⚠️ Error Details:\n${results.errors.join('\n')}`;
         }
         
-        alert(message);
-        if (results.success) {
-          console.log('Reloading data...');
-          await loadData();
+        alert(successMessage);
+        
+        // Refresh the data if users were updated
+        if (type.toLowerCase() === 'users' && results.success) {
+          await loadData(); // Reload the data instead of full page refresh
         }
-      } else if (type.toLowerCase() === 'payments') {
-        console.log('Parsing payments CSV...');
-        const paymentData = await localDB.parseCSV(fileContent);
-        console.log('Parsed payments data:', paymentData.length, 'records');
+      } else {
+        let errorMessage = `Failed to process ${type} file.\n\n`;
         
-        console.log('Importing payments...');
-        const results = await localDB.importPayments(paymentData);
-        console.log('Import results:', results);
-        
-        let message = `Payments imported successfully!\n`;
-        message += `Added: ${results.added}, Updated: ${results.updated}\n`;
-        if (results.errors.length > 0) {
-          message += `Errors: ${results.errors.length}\n${results.errors.slice(0, 5).join('\n')}`;
-          if (results.errors.length > 5) {
-            message += `\n... and ${results.errors.length - 5} more errors`;
-          }
+        if (result.validationErrors && result.validationErrors.length > 0) {
+          errorMessage += `Validation Errors:\n${result.validationErrors.join('\n')}`;
+        } else {
+          errorMessage += `Error: ${result.error}`;
         }
         
-        alert(message);
-        if (results.success) {
-          console.log('Reloading data...');
-          await loadData();
-        }
+        alert(errorMessage);
       }
     } catch (error) {
       console.error('Upload error:', error);
-      alert(`Failed to process file: ${error instanceof Error ? error.message : 'Unknown error'}. Check the console for details.`);
+      alert('Failed to upload file. Please try again.');
     } finally {
       setLoading(false);
+      // Clear the file input
       event.target.value = '';
     }
   };
 
-  const downloadTemplate = (type: 'users' | 'payments') => {
-    let csvContent = '';
-    
-    if (type === 'users') {
-      csvContent = 'name,email,phone,nicNumber,dateOfBirth,address,role,houseNumber,amount,status\n';
-      csvContent += 'John Doe,john@example.com,+1234567890,123456789V,1990-01-01,123 Street,member,A-101,150.00,paid\n';
-    } else {
-      csvContent = 'email,amount,date,status,method,reference\n';
-      csvContent += 'john@example.com,150.00,2025-01-15,paid,bank,TXN123\n';
+  const downloadTemplate = async (type: 'users' | 'payments', format: 'excel' | 'csv' = 'excel') => {
+    try {
+      const response = await fetch(`/api/templates?type=${type}&format=${format}`);
+      if (response.ok) {
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const extension = format === 'csv' ? 'csv' : 'xlsx';
+        a.download = `${type}_template.${extension}`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        const formatName = format === 'csv' ? 'Google Sheets (CSV)' : 'Excel';
+        alert(`${type} template downloaded successfully as ${formatName}!`);
+      } else {
+        alert('Failed to generate template');
+      }
+    } catch (error) {
+      console.error('Error generating template:', error);
+      alert('Failed to generate template');
     }
-    
-    const blob = new Blob([csvContent], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${type}_template.csv`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    window.URL.revokeObjectURL(url);
   };
 
-  const exportData = async (type: 'users' | 'payments', format: 'csv' | 'excel' = 'csv') => {
+  const exportUsersData = async (format: 'excel' | 'csv' = 'excel') => {
     try {
-      let csvContent = '';
-      
-      if (type === 'users') {
-        csvContent = 'id,name,email,phone,nicNumber,dateOfBirth,address,role,houseNumber,membershipDate,isActive\n';
-        members.forEach(member => {
-          const dateOfBirth = member.dateOfBirth ? new Date(member.dateOfBirth).toISOString().split('T')[0] : '';
-          const membershipDate = member.membershipDate ? new Date(member.membershipDate).toISOString().split('T')[0] : '';
-          csvContent += `"${member.id}","${member.name}","${member.email}","${member.phone}","${member.nicNumber || ''}","${dateOfBirth}","${member.address || ''}","${member.role}","${member.houseNumber || ''}","${membershipDate}","${member.isActive}"\n`;
-        });
+      // Use current members data (including manually added ones)
+      const exportData = members.map(member => ({
+        'Full Name': member.name,
+        'Email': member.email,
+        'Phone': member.phone,
+        'NIC Number': member.nicNumber,
+        'Date of Birth': new Date(member.dateOfBirth).toISOString().split('T')[0],
+        'Address': member.address,
+        'House Number': member.houseNumber || '',
+        'Role': member.role,
+        'Membership Date': new Date(member.membershipDate).toISOString().split('T')[0],
+        'Status': member.isActive ? 'Active' : 'Inactive'
+      }));
+
+      if (format === 'csv') {
+        // Export as CSV
+        const csvContent = [
+          Object.keys(exportData[0]).join(','),
+          ...exportData.map(row => Object.values(row).map(val => `"${val}"`).join(','))
+        ].join('\n');
+
+        const blob = new Blob([csvContent], { type: 'text/csv' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `hambrian_glory_members_${new Date().toISOString().split('T')[0]}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
       } else {
-        const payments = await localDB.getAllPayments();
-        csvContent = 'User Email,Amount,Date,Status,Method,Reference\n';
-        payments.forEach(payment => {
-          const user = members.find(m => m.id === payment.userId);
-          csvContent += `"${user?.email || ''}","${payment.amount}","${payment.date}","${payment.status}","${payment.method}","${payment.reference || ''}"\n`;
+        // Export as Excel via API
+        const response = await fetch('/api/export/users', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ users: exportData }),
         });
+
+        if (response.ok) {
+          const blob = await response.blob();
+          const url = window.URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `hambrian_glory_members_${new Date().toISOString().split('T')[0]}.xlsx`;
+          document.body.appendChild(a);
+          a.click();
+          window.URL.revokeObjectURL(url);
+          document.body.removeChild(a);
+        } else {
+          throw new Error('Failed to export Excel file');
+        }
+      }
+
+      const formatName = format === 'csv' ? 'CSV' : 'Excel';
+      alert(`Users data exported successfully as ${formatName}! (${members.length} members included)`);
+    } catch (error) {
+      console.error('Error exporting users data:', error);
+      
+      // Fallback to CSV if Excel export fails
+      if (format === 'excel') {
+        alert('Excel export failed. Falling back to CSV export...');
+        exportUsersData('csv');
+        return;
       }
       
+      alert('Failed to export users data');
+    }
+  };
+
+  const exportPaymentsData = async () => {
+    // For now, export a sample structure since we don't have actual payment data
+    try {
+      const samplePaymentData = [
+        {
+          'Member Name': 'Sample Member',
+          'Email': 'sample@example.com',
+          'Amount': '5000',
+          'Payment Date': new Date().toISOString().split('T')[0],
+          'Payment Type': 'Monthly Fee',
+          'Status': 'Paid',
+          'Reference': 'REF001'
+        }
+      ];
+
+      const csvContent = [
+        Object.keys(samplePaymentData[0]).join(','),
+        ...samplePaymentData.map(row => Object.values(row).map(val => `"${val}"`).join(','))
+      ].join('\n');
+
       const blob = new Blob([csvContent], { type: 'text/csv' });
       const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `${type}_export_${new Date().toISOString().split('T')[0]}.csv`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `hambrian_glory_payments_template_${new Date().toISOString().split('T')[0]}.csv`;
+      document.body.appendChild(a);
+      a.click();
       window.URL.revokeObjectURL(url);
-      
-      alert(`${type} data exported successfully!`);
+      document.body.removeChild(a);
+
+      alert('Payment data template exported successfully!');
     } catch (error) {
-      console.error('Export error:', error);
-      alert('Failed to export data.');
+      console.error('Error exporting payment data:', error);
+      alert('Failed to export payment data');
     }
+  };
+
+  const exportFinancialReport = async () => {
+    try {
+      const reportData = [
+        {
+          'Category': 'Total Members',
+          'Value': members.length,
+          'Details': 'Current active and inactive members'
+        },
+        {
+          'Category': 'Total Collected',
+          'Value': stats?.totalCollected || 0,
+          'Details': 'LKR amount collected to date'
+        },
+        {
+          'Category': 'Pending Payments', 
+          'Value': stats?.pendingPayments || 0,
+          'Details': 'LKR amount pending collection'
+        },
+        {
+          'Category': 'Total Expenses',
+          'Value': stats?.totalExpenses || 0,
+          'Details': 'LKR amount spent on community'
+        },
+        {
+          'Category': 'Community Balance',
+          'Value': stats?.communityBalance || 0,
+          'Details': 'Current available balance'
+        }
+      ];
+
+      const csvContent = [
+        Object.keys(reportData[0]).join(','),
+        ...reportData.map(row => Object.values(row).map(val => `"${val}"`).join(','))
+      ].join('\n');
+
+      const blob = new Blob([csvContent], { type: 'text/csv' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `hambrian_glory_financial_report_${new Date().toISOString().split('T')[0]}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+
+      alert('Financial report exported successfully!');
+    } catch (error) {
+      console.error('Error exporting financial report:', error);
+      alert('Failed to export financial report');
+    }
+  };
+
+  const handleEditMember = (memberId: string) => {
+    const member = members.find(m => m.id === memberId);
+    if (member) {
+      setEditingMember(memberId);
+      setEditForm({ ...member });
+    }
+  };
+
+  const handleSaveMember = async () => {
+    if (editingMember && editForm) {
+      try {
+        // Update member in backend
+        const response = await fetch('/api/users', {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            id: editingMember,
+            ...editForm
+          }),
+        });
+
+        if (response.ok) {
+          // Update local state only if backend update was successful
+          setMembers(members.map(member => 
+            member.id === editingMember 
+              ? { ...member, ...editForm } as User 
+              : member
+          ));
+          setEditingMember(null);
+          setEditForm({});
+          alert('Member details updated successfully!');
+          
+          // Reload data to ensure consistency
+          loadData();
+        } else {
+          const errorData = await response.json();
+          alert(`Failed to update member: ${errorData.message}`);
+        }
+      } catch (error) {
+        console.error('Error updating member:', error);
+        alert('Failed to update member. Please try again.');
+      }
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setEditingMember(null);
+    setEditForm({});
+  };
+
+  const handleInputChange = (field: keyof User, value: string | boolean) => {
+    setEditForm(prev => ({
+      ...prev,
+      [field]: field === 'dateOfBirth' || field === 'membershipDate' 
+        ? new Date(value as string) 
+        : value
+    }));
+  };
+
+  const handleDeleteMember = async (memberId: string, memberName: string) => {
+    // Confirm deletion
+    if (window.confirm(`Are you sure you want to delete member "${memberName}"? This action cannot be undone.`)) {
+      try {
+        // Delete member from backend
+        const response = await fetch(`/api/users?id=${memberId}`, {
+          method: 'DELETE',
+        });
+
+        if (response.ok) {
+          // Update local state only if backend deletion was successful
+          const updatedMembers = members.filter(member => member.id !== memberId);
+          setMembers(updatedMembers);
+          setFilteredMembers(updatedMembers.filter(member =>
+            !searchTerm.trim() ||
+            member.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            member.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            member.phone.includes(searchTerm) ||
+            member.nicNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            (member.houseNumber && member.houseNumber.toLowerCase().includes(searchTerm.toLowerCase())) ||
+            member.role.toLowerCase().includes(searchTerm.toLowerCase())
+          ));
+          
+          // Update stats with new member count
+          setStats(prev => prev ? {
+            ...prev,
+            totalMembers: updatedMembers.length
+          } : null);
+          
+          // If we were editing this member, cancel the edit
+          if (editingMember === memberId) {
+            setEditingMember(null);
+            setEditForm({});
+          }
+          
+          alert(`Member "${memberName}" has been deleted successfully.`);
+          
+          // Reload data to ensure consistency
+          loadData();
+        } else {
+          const errorData = await response.json();
+          alert(`Failed to delete member: ${errorData.message}`);
+        }
+      } catch (error) {
+        console.error('Error deleting member:', error);
+        alert('Failed to delete member. Please try again.');
+      }
+    }
+  };
+
+  const handleSearchChange = (value: string) => {
+    setSearchTerm(value);
+  };
+
+  const handleAddMember = () => {
+    setShowAddMemberModal(true);
+    setAddMemberForm({
+      name: '',
+      email: '',
+      phone: '',
+      nicNumber: '',
+      dateOfBirth: new Date(),
+      address: '',
+      role: 'member',
+      houseNumber: '',
+      isActive: true
+    });
+  };
+
+  const handleAddMemberInputChange = (field: keyof User, value: string | boolean | Date) => {
+    setAddMemberForm(prev => ({
+      ...prev,
+      [field]: field === 'dateOfBirth' && typeof value === 'string' 
+        ? new Date(value) 
+        : value
+    }));
+  };
+
+  const handleSaveNewMember = async () => {
+    // Validate required fields
+    if (!addMemberForm.name || !addMemberForm.email || !addMemberForm.phone || !addMemberForm.nicNumber) {
+      alert('Please fill in all required fields (Name, Email, Phone, NIC Number)');
+      return;
+    }
+
+    // Check if email already exists
+    if (members.some(member => member.email === addMemberForm.email)) {
+      alert('A member with this email already exists');
+      return;
+    }
+
+    // Generate new member ID
+    const newId = 'user_' + Date.now();
+    
+    // Create new member object
+    const newMember: User = {
+      id: newId,
+      name: addMemberForm.name!,
+      email: addMemberForm.email!,
+      phone: addMemberForm.phone!,
+      nicNumber: addMemberForm.nicNumber!,
+      dateOfBirth: addMemberForm.dateOfBirth || new Date(),
+      address: addMemberForm.address || '',
+      role: addMemberForm.role as 'member' | 'admin' || 'member',
+      houseNumber: addMemberForm.houseNumber,
+      membershipDate: new Date(), // Set to current date
+      isActive: addMemberForm.isActive !== undefined ? addMemberForm.isActive : true
+    };
+
+    // Add to local state
+    const updatedMembers = [...members, newMember];
+    setMembers(updatedMembers);
+    setFilteredMembers(updatedMembers.filter(member =>
+      !searchTerm.trim() ||
+      member.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      member.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      member.phone.includes(searchTerm) ||
+      member.nicNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (member.houseNumber && member.houseNumber.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      member.role.toLowerCase().includes(searchTerm.toLowerCase())
+    ));
+
+    // Add to DataService for persistence
+    try {
+      const response = await fetch('/api/users', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(newMember),
+      });
+
+      if (response.ok) {
+        alert(`Member "${newMember.name}" has been added successfully!`);
+        setShowAddMemberModal(false);
+        
+        // Update stats
+        setStats(prev => prev ? {
+          ...prev,
+          totalMembers: updatedMembers.length
+        } : null);
+      } else {
+        throw new Error('Failed to save member');
+      }
+    } catch (error) {
+      console.error('Error saving member:', error);
+      alert('Member added locally but failed to save to database. Please try refreshing.');
+    }
+  };
+
+  const handleCancelAddMember = () => {
+    setShowAddMemberModal(false);
+    setAddMemberForm({
+      name: '',
+      email: '',
+      phone: '',
+      nicNumber: '',
+      dateOfBirth: new Date(),
+      address: '',
+      role: 'member',
+      houseNumber: '',
+      isActive: true
+    });
+  };
+
+  // Account Management Functions
+  const loadAccountIssues = async () => {
+    setAccountLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch('/api/admin/accounts', {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setAccountIssues(data.users || []);
+        setFilteredAccountIssues(data.users || []);
+      } else {
+        console.error('Failed to load account issues');
+        alert('Failed to load account information');
+      }
+    } catch (error) {
+      console.error('Error loading account issues:', error);
+      alert('Error loading account information');
+    } finally {
+      setAccountLoading(false);
+    }
+  };
+
+  const unlockAccount = async (userId: string) => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch('/api/admin/accounts', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          action: 'unlock',
+          userId
+        })
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        alert(result.message);
+        loadAccountIssues(); // Refresh the list
+      } else {
+        const error = await response.json();
+        alert(`Failed to unlock account: ${error.error}`);
+      }
+    } catch (error) {
+      console.error('Error unlocking account:', error);
+      alert('Error unlocking account');
+    }
+  };
+
+  const resetPasswordToNIC = async (userId: string, nicNumber: string) => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch('/api/admin/accounts', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          action: 'reset_password',
+          userId,
+          nicNumber
+        })
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        alert(result.message);
+        loadAccountIssues(); // Refresh the list
+      } else {
+        const error = await response.json();
+        alert(`Failed to reset password: ${error.error}`);
+      }
+    } catch (error) {
+      console.error('Error resetting password:', error);
+      alert('Error resetting password');
+    }
+  };
+
+  const unlockAllAccounts = async () => {
+    if (!confirm('Are you sure you want to unlock ALL user accounts? This will reset all failed login attempts.')) {
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch('/api/admin/accounts', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          action: 'unlock_all'
+        })
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        alert(result.message);
+        loadAccountIssues(); // Refresh the list
+      } else {
+        const error = await response.json();
+        alert(`Failed to unlock accounts: ${error.error}`);
+      }
+    } catch (error) {
+      console.error('Error unlocking all accounts:', error);
+      alert('Error unlocking all accounts');
+    }
+  };
+
+  // Login History Functions
+  const loadLoginHistory = async (reset: boolean = false) => {
+    setHistoryLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const offset = reset ? 0 : historyOffset;
+      const response = await fetch(
+        `/api/admin/login-history?days=${historyDays}&limit=50&offset=${offset}&role=${historyRoleFilter}`,
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        }
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        if (reset) {
+          setLoginHistory(data.history || []);
+          setHistoryOffset(0);
+        } else {
+          setLoginHistory(prev => [...prev, ...(data.history || [])]);
+        }
+        setLoginStats(data.stats);
+        setHistoryHasMore(data.hasMore);
+        if (reset) {
+          setHistoryOffset(data.history?.length || 0);
+        } else {
+          setHistoryOffset(prev => prev + (data.history?.length || 0));
+        }
+      } else {
+        console.error('Failed to load login history');
+        alert('Failed to load login history');
+      }
+    } catch (error) {
+      console.error('Error loading login history:', error);
+      alert('Error loading login history');
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  const loadMoreHistory = () => {
+    if (!historyLoading && historyHasMore) {
+      loadLoginHistory(false);
+    }
+  };
+
+  const refreshLoginHistory = () => {
+    setHistoryOffset(0);
+    loadLoginHistory(true);
+  };
+
+  const handleHistoryFilterChange = (days: number, role: string) => {
+    setHistoryDays(days);
+    setHistoryRoleFilter(role);
+    setHistoryOffset(0);
+    // Load will be triggered by useEffect
   };
 
   const downloadLoginHistory = async (format: 'csv' | 'json') => {
     try {
-      const data = await localDB.downloadLoginHistory(format, historyDays, historyRoleFilter);
-      const blob = new Blob([data], { type: format === 'csv' ? 'text/csv' : 'application/json' });
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `login_history_${new Date().toISOString().split('T')[0]}.${format}`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
+      const token = localStorage.getItem('token');
+      const timestamp = new Date().toISOString().split('T')[0];
+      const roleFilterText = historyRoleFilter === 'all' ? 'all-users' : historyRoleFilter;
+      const filename = `login-history-${timestamp}-${historyDays}days-${roleFilterText}`;
+      
+      const url = `/api/admin/login-history/download?days=${historyDays}&role=${historyRoleFilter}&format=${format}&filename=${filename}`;
+      
+      const response = await fetch(url, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (response.ok) {
+        const blob = await response.blob();
+        const downloadUrl = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = downloadUrl;
+        link.download = `${filename}.${format}`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(downloadUrl);
+        
+        // Show success message
+        alert(`Login history downloaded successfully as ${format.toUpperCase()} file!`);
+      } else {
+        const error = await response.json();
+        alert(`Failed to download login history: ${error.error}`);
+      }
     } catch (error) {
-      console.error('Download error:', error);
-      alert('Failed to download login history.');
+      console.error('Error downloading login history:', error);
+      alert('Error downloading login history');
     }
   };
+
+  // Load account issues when accounts tab is selected
+  useEffect(() => {
+    if (activeTab === 'accounts') {
+      loadAccountIssues();
+    }
+  }, [activeTab]);
+
+  // Load login history when login history tab is selected
+  useEffect(() => {
+    if (activeTab === 'loginHistory') {
+      refreshLoginHistory();
+    }
+  }, [activeTab, historyDays, historyRoleFilter]);
 
   if (loading) {
     return (
@@ -413,7 +924,7 @@ Health Check: ${healthCheck.isHealthy ? 'HEALTHY' : 'ISSUES FOUND'}`;
             <div className="flex items-center space-x-2 sm:space-x-3">
               <div className="w-8 h-8 sm:w-10 sm:h-10 relative bg-gradient-to-br from-blue-50 to-white rounded-xl p-1 sm:p-1.5 shadow-sm border border-blue-100">
                 <Image
-                  src={LOGO_PATH}
+                  src="/logo.png"
                   alt="Hambrian Glory Logo"
                   width={32}
                   height={32}
@@ -425,7 +936,7 @@ Health Check: ${healthCheck.isHealthy ? 'HEALTHY' : 'ISSUES FOUND'}`;
                 <p className="text-xs sm:text-sm text-gray-500">Admin Dashboard</p>
               </div>
             </div>
-
+            
             <div className="flex items-center space-x-2 sm:space-x-4">
               <Link href="/" className="text-gray-500 hover:text-gray-700 touch-target">
                 <Home className="w-4 h-4 sm:w-5 sm:h-5" />
@@ -434,14 +945,6 @@ Health Check: ${healthCheck.isHealthy ? 'HEALTHY' : 'ISSUES FOUND'}`;
                 <CreditCard className="w-4 h-4 sm:w-5 sm:h-5" />
               </Link>
               <Bell className="w-4 h-4 sm:w-5 sm:h-5 text-gray-400 hover:text-gray-600 cursor-pointer touch-target" />
-              <button
-                onClick={checkDatabaseStatus}
-                className="flex items-center space-x-2 text-gray-700 hover:text-blue-600 px-3 py-2 rounded border"
-                title="Check Database Status"
-              >
-                <Shield className="w-4 h-4" />
-                <span className="hidden sm:inline">Debug DB</span>
-              </button>
               <div className="hidden sm:flex items-center space-x-2">
                 <Settings className="w-5 h-5 text-gray-400" />
                 <span className="text-sm font-medium text-gray-700">Admin</span>
@@ -464,7 +967,7 @@ Health Check: ${healthCheck.isHealthy ? 'HEALTHY' : 'ISSUES FOUND'}`;
           <h1 className="text-xl sm:text-2xl font-bold text-gray-900 mb-2">
             Community Management Dashboard
           </h1>
-          <p className="text-sm sm:text-base text-gray-600">Manage members, payments, and community operations efficiently.</p>
+          <p className="text-sm sm:text-base text-gray-600">Manage members, payments, and community operations.</p>
         </div>
 
         {/* Tabs Navigation */}
@@ -492,16 +995,6 @@ Health Check: ${healthCheck.isHealthy ? 'HEALTHY' : 'ISSUES FOUND'}`;
                 Members
               </button>
               <button
-                onClick={() => setActiveTab('accountManagement')}
-                className={`py-2 px-1 border-b-2 font-medium text-sm whitespace-nowrap ${
-                  activeTab === 'accountManagement'
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                }`}
-              >
-                Account Management
-              </button>
-              <button
                 onClick={() => setActiveTab('whatsapp')}
                 className={`py-2 px-1 border-b-2 font-medium text-sm whitespace-nowrap ${
                   activeTab === 'whatsapp'
@@ -512,14 +1005,14 @@ Health Check: ${healthCheck.isHealthy ? 'HEALTHY' : 'ISSUES FOUND'}`;
                 WhatsApp
               </button>
               <button
-                onClick={() => setActiveTab('cloudSync')}
+                onClick={() => setActiveTab('accounts')}
                 className={`py-2 px-1 border-b-2 font-medium text-sm whitespace-nowrap ${
-                  activeTab === 'cloudSync'
+                  activeTab === 'accounts'
                     ? 'border-blue-500 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                 }`}
               >
-                Cloud Sync
+                Account Management
               </button>
               <button
                 onClick={() => setActiveTab('loginHistory')}
@@ -549,6 +1042,7 @@ Health Check: ${healthCheck.isHealthy ? 'HEALTHY' : 'ISSUES FOUND'}`;
                   <Users className="w-6 h-6 sm:w-8 sm:h-8 text-blue-600" />
                 </div>
               </div>
+
               <div className="bg-white p-4 sm:p-6 rounded-lg shadow-sm border border-gray-200">
                 <div className="flex items-center justify-between">
                   <div>
@@ -560,6 +1054,7 @@ Health Check: ${healthCheck.isHealthy ? 'HEALTHY' : 'ISSUES FOUND'}`;
                   <TrendingUp className="w-6 h-6 sm:w-8 sm:h-8 text-green-600" />
                 </div>
               </div>
+
               <div className="bg-white p-4 sm:p-6 rounded-lg shadow-sm border border-gray-200">
                 <div className="flex items-center justify-between">
                   <div>
@@ -571,6 +1066,7 @@ Health Check: ${healthCheck.isHealthy ? 'HEALTHY' : 'ISSUES FOUND'}`;
                   <AlertCircle className="w-6 h-6 sm:w-8 sm:h-8 text-red-600" />
                 </div>
               </div>
+
               <div className="bg-white p-4 sm:p-6 rounded-lg shadow-sm border border-gray-200">
                 <div className="flex items-center justify-between">
                   <div>
@@ -582,6 +1078,7 @@ Health Check: ${healthCheck.isHealthy ? 'HEALTHY' : 'ISSUES FOUND'}`;
                   <BarChart3 className="w-8 h-8 text-orange-600" />
                 </div>
               </div>
+
               <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
                 <div className="flex items-center justify-between">
                   <div>
@@ -604,29 +1101,29 @@ Health Check: ${healthCheck.isHealthy ? 'HEALTHY' : 'ISSUES FOUND'}`;
                 </h3>
                 <div className="space-y-3">
                   <label className="block">
-                    <span className="text-sm text-gray-600">Upload Users Data (CSV)</span>
+                    <span className="text-sm text-gray-600">Upload Users Data (Excel/CSV)</span>
                     <input
                       type="file"
-                      accept=".csv"
+                      accept=".xlsx,.xls,.csv"
                       onChange={(e) => handleFileUpload(e, 'Users')}
                       disabled={loading}
                       className="mt-1 block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 disabled:opacity-50"
                     />
                     <p className="text-xs text-gray-500 mt-1">
-                      {loading ? 'Processing file...' : 'Supports CSV format'}
+                      {loading ? 'Processing file...' : 'Supports Excel (.xlsx) and Google Sheets (.csv) formats'}
                     </p>
                   </label>
                   <label className="block">
-                    <span className="text-sm text-gray-600">Upload Payments Data (CSV)</span>
+                    <span className="text-sm text-gray-600">Upload Payments Data (Excel/CSV)</span>
                     <input
                       type="file"
-                      accept=".csv"
+                      accept=".xlsx,.xls,.csv"
                       onChange={(e) => handleFileUpload(e, 'Payments')}
                       disabled={loading}
                       className="mt-1 block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-green-50 file:text-green-700 hover:file:bg-green-100 disabled:opacity-50"
                     />
                     <p className="text-xs text-gray-500 mt-1">
-                      {loading ? 'Processing file...' : 'Supports CSV format'}
+                      {loading ? 'Processing file...' : 'Supports Excel (.xlsx) and Google Sheets (.csv) formats'}
                     </p>
                   </label>
                   {loading && (
@@ -644,33 +1141,71 @@ Health Check: ${healthCheck.isHealthy ? 'HEALTHY' : 'ISSUES FOUND'}`;
                   <span>Export Data</span>
                 </h3>
                 <div className="space-y-3">
-                  <button
-                    onClick={() => exportData('users', 'csv')}
-                    className="w-full bg-green-50 text-green-700 py-2 px-4 rounded-lg hover:bg-green-100 transition-colors text-sm"
-                  >
-                    Export Users CSV
-                  </button>
-                  <button
-                    onClick={() => exportData('payments', 'csv')}
+                  <div className="grid grid-cols-2 gap-2">
+                    <button 
+                      onClick={() => exportUsersData('excel')}
+                      className="w-full bg-green-50 text-green-700 py-2 px-4 rounded-lg hover:bg-green-100 transition-colors text-sm"
+                    >
+                      Export Users Excel
+                    </button>
+                    <button 
+                      onClick={() => exportUsersData('csv')}
+                      className="w-full bg-green-50 text-green-700 py-2 px-4 rounded-lg hover:bg-green-100 transition-colors text-sm"
+                    >
+                      Export Users CSV
+                    </button>
+                  </div>
+                  <button 
+                    onClick={exportPaymentsData}
                     className="w-full bg-blue-50 text-blue-700 py-2 px-4 rounded-lg hover:bg-blue-100 transition-colors text-sm"
                   >
-                    Export Payments CSV
+                    Export Payments Data
+                  </button>
+                  <button 
+                    onClick={exportFinancialReport}
+                    className="w-full bg-purple-50 text-purple-700 py-2 px-4 rounded-lg hover:bg-purple-100 transition-colors text-sm"
+                  >
+                    Export Financial Report
                   </button>
                   <hr className="my-2" />
                   <p className="text-xs text-gray-500 mb-2">Template Downloads:</p>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      onClick={() => downloadTemplate('users')}
-                      className="bg-green-50 text-green-700 py-2 px-3 rounded-lg hover:bg-green-100 transition-colors text-xs"
-                    >
-                      Users Template
-                    </button>
-                    <button
-                      onClick={() => downloadTemplate('payments')}
-                      className="bg-blue-50 text-blue-700 py-2 px-3 rounded-lg hover:bg-blue-100 transition-colors text-xs"
-                    >
-                      Payments Template
-                    </button>
+                  
+                  {/* Users Templates */}
+                  <div className="mb-3">
+                    <p className="text-xs text-gray-600 mb-1">Users Templates:</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button 
+                        onClick={() => downloadTemplate('users', 'excel')}
+                        className="bg-green-50 text-green-700 py-2 px-3 rounded-lg hover:bg-green-100 transition-colors text-xs"
+                      >
+                        Excel (.xlsx)
+                      </button>
+                      <button 
+                        onClick={() => downloadTemplate('users', 'csv')}
+                        className="bg-blue-50 text-blue-700 py-2 px-3 rounded-lg hover:bg-blue-100 transition-colors text-xs"
+                      >
+                        Google Sheets (.csv)
+                      </button>
+                    </div>
+                  </div>
+                  
+                  {/* Payments Templates */}
+                  <div className="mb-3">
+                    <p className="text-xs text-gray-600 mb-1">Payments Templates:</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button 
+                        onClick={() => downloadTemplate('payments', 'excel')}
+                        className="bg-orange-50 text-orange-700 py-2 px-3 rounded-lg hover:bg-orange-100 transition-colors text-xs"
+                      >
+                        Excel (.xlsx)
+                      </button>
+                      <button 
+                        onClick={() => downloadTemplate('payments', 'csv')}
+                        className="bg-red-50 text-red-700 py-2 px-3 rounded-lg hover:bg-red-100 transition-colors text-xs"
+                      >
+                        Google Sheets (.csv)
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -721,9 +1256,16 @@ Health Check: ${healthCheck.isHealthy ? 'HEALTHY' : 'ISSUES FOUND'}`;
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between space-y-3 sm:space-y-0">
                 <div>
                   <h2 className="text-lg font-semibold text-gray-900">All Members</h2>
-                  <p className="text-sm text-gray-600">Manage member accounts ({filteredMembers.length} of {members.length} members)</p>
+                  <p className="text-sm text-gray-600">View and edit member details ({filteredMembers.length} of {members.length} members)</p>
                 </div>
                 <div className="flex flex-col sm:flex-row sm:items-center space-y-2 sm:space-y-0 sm:space-x-3">
+                  <button
+                    onClick={handleAddMember}
+                    className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                  >
+                    <UserPlus className="w-4 h-4 mr-2" />
+                    Add Member
+                  </button>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                       <Search className="h-5 w-5 text-gray-400" />
@@ -732,291 +1274,203 @@ Health Check: ${healthCheck.isHealthy ? 'HEALTHY' : 'ISSUES FOUND'}`;
                       type="text"
                       placeholder="Search members..."
                       value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
+                      onChange={(e) => handleSearchChange(e.target.value)}
                       className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 text-gray-900 sm:text-sm"
                     />
                   </div>
-                  <button
-                    onClick={() => setShowAddMemberModal(true)}
-                    className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-                  >
-                    <UserPlus className="w-4 h-4" />
-                    <span>Add Member</span>
-                  </button>
                 </div>
               </div>
-              
-              {/* Bulk Actions */}
-              {selectedUsers.length > 0 && (
-                <div className="mt-4 flex items-center justify-between bg-blue-50 px-4 py-3 rounded-md">
-                  <span className="text-sm text-blue-800">
-                    {selectedUsers.length} member(s) selected
-                  </span>
-                  <div className="flex space-x-2">
-                    <button
-                      onClick={async () => {
-                        if (confirm(`Are you sure you want to delete ${selectedUsers.length} selected member(s)?`)) {
-                          for (const userId of selectedUsers) {
-                            await localDB.deleteUser(userId);
-                          }
-                          setSelectedUsers([]);
-                          await loadData();
-                        }
-                      }}
-                      className="flex items-center space-x-1 px-3 py-1 bg-red-600 text-white rounded text-sm hover:bg-red-700"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                      <span>Delete Selected</span>
-                    </button>
-                    <button
-                      onClick={() => setSelectedUsers([])}
-                      className="flex items-center space-x-1 px-3 py-1 bg-gray-600 text-white rounded text-sm hover:bg-gray-700"
-                    >
-                      <X className="w-4 h-4" />
-                      <span>Clear Selection</span>
-                    </button>
-                  </div>
-                </div>
-              )}
             </div>
-            
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-6 py-3 text-left">
-                      <input
-                        type="checkbox"
-                        checked={selectAll}
-                        onChange={(e) => {
-                          const checked = e.target.checked;
-                          setSelectAll(checked);
-                          if (checked) {
-                            setSelectedUsers(filteredMembers.map(m => m.id));
-                          } else {
-                            setSelectedUsers([]);
-                          }
-                        }}
-                        className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                      />
-                    </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Member</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Contact</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Personal Info</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Membership</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
                   {filteredMembers.map((member) => (
-                    <tr key={member.id} className={selectedUsers.includes(member.id) ? 'bg-blue-50' : ''}>
+                    <tr key={member.id}>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <input
-                          type="checkbox"
-                          checked={selectedUsers.includes(member.id)}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setSelectedUsers([...selectedUsers, member.id]);
-                            } else {
-                              setSelectedUsers(selectedUsers.filter(id => id !== member.id));
-                              setSelectAll(false);
-                            }
-                          }}
-                          className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                        />
+                        {editingMember === member.id ? (
+                          <div className="space-y-2">
+                            <input
+                              type="text"
+                              value={editForm.name || ''}
+                              onChange={(e) => handleInputChange('name', e.target.value)}
+                              className="block w-full border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-gray-900"
+                              placeholder="Full Name"
+                            />
+                            <input
+                              type="email"
+                              value={editForm.email || ''}
+                              onChange={(e) => handleInputChange('email', e.target.value)}
+                              className="block w-full border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-gray-900"
+                              placeholder="Email"
+                            />
+                            <select
+                              value={editForm.role || 'member'}
+                              onChange={(e) => handleInputChange('role', e.target.value)}
+                              className="block w-full border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-gray-900"
+                            >
+                              <option value="member">Member</option>
+                              <option value="admin">Admin</option>
+                            </select>
+                            <label className="flex items-center space-x-2">
+                              <input
+                                type="checkbox"
+                                checked={editForm.isActive !== undefined ? editForm.isActive : true}
+                                onChange={(e) => handleInputChange('isActive', e.target.checked)}
+                                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                              />
+                              <span className="text-sm text-gray-700">Active Member</span>
+                            </label>
+                          </div>
+                        ) : (
+                          <div className="flex items-center space-x-3">
+                            <ProfilePicture 
+                              user={member} 
+                              onUpdate={(updatedUser) => {
+                                setMembers(prev => prev.map(m => m.id === updatedUser.id ? updatedUser : m));
+                                setFilteredMembers(prev => prev.map(m => m.id === updatedUser.id ? updatedUser : m));
+                              }}
+                              size="small"
+                            />
+                            <div>
+                              <div className="text-sm font-medium text-gray-900">{member.name}</div>
+                              <div className="text-sm text-gray-500">{member.email}</div>
+                              <div className="text-xs text-gray-400">
+                                <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                                  member.role === 'admin' ? 'bg-purple-100 text-purple-800' : 'bg-green-100 text-green-800'
+                                }`}>
+                                  {member.role}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        )}
                       </td>
-                      
-                      {editingMember === member.id ? (
-                        // Edit Mode Row
-                        <>
-                          <td className="px-6 py-4">
-                            <div className="space-y-2">
-                              <input
-                                type="text"
-                                value={editForm.name || ''}
-                                onChange={(e) => setEditForm({...editForm, name: e.target.value})}
-                                className="block w-full px-3 py-1 border border-gray-300 rounded-md text-sm"
-                                placeholder="Name"
-                              />
-                              <input
-                                type="email"
-                                value={editForm.email || ''}
-                                onChange={(e) => setEditForm({...editForm, email: e.target.value})}
-                                className="block w-full px-3 py-1 border border-gray-300 rounded-md text-sm"
-                                placeholder="Email"
-                              />
-                              <select
-                                value={editForm.role || 'member'}
-                                onChange={(e) => setEditForm({...editForm, role: e.target.value as 'admin' | 'member'})}
-                                className="block w-full px-3 py-1 border border-gray-300 rounded-md text-sm"
-                              >
-                                <option value="member">Member</option>
-                                <option value="admin">Admin</option>
-                              </select>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        {editingMember === member.id ? (
+                          <div className="space-y-2">
+                            <input
+                              type="tel"
+                              value={editForm.phone || ''}
+                              onChange={(e) => handleInputChange('phone', e.target.value)}
+                              className="block w-full border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-gray-900"
+                              placeholder="Phone"
+                            />
+                            <textarea
+                              value={editForm.address || ''}
+                              onChange={(e) => handleInputChange('address', e.target.value)}
+                              className="block w-full border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-gray-900"
+                              placeholder="Address"
+                              rows={2}
+                            />
+                          </div>
+                        ) : (
+                          <div>
+                            <div className="text-sm text-gray-900">{member.phone}</div>
+                            <div className="text-sm text-gray-500">{member.address}</div>
+                            {member.houseNumber && (
+                              <div className="text-xs text-gray-400">House: {member.houseNumber}</div>
+                            )}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        {editingMember === member.id ? (
+                          <div className="space-y-2">
+                            <input
+                              type="text"
+                              value={editForm.nicNumber || ''}
+                              onChange={(e) => handleInputChange('nicNumber', e.target.value)}
+                              className="block w-full border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-gray-900"
+                              placeholder="NIC Number"
+                            />
+                            <input
+                              type="date"
+                              value={editForm.dateOfBirth ? new Date(editForm.dateOfBirth).toISOString().split('T')[0] : ''}
+                              onChange={(e) => handleInputChange('dateOfBirth', e.target.value)}
+                              className="block w-full border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-gray-900"
+                            />
+                          </div>
+                        ) : (
+                          <div>
+                            <div className="text-sm text-gray-900">NIC: {member.nicNumber}</div>
+                            <div className="text-sm text-gray-500">DOB: {new Date(member.dateOfBirth).toLocaleDateString()}</div>
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        {editingMember === member.id ? (
+                          <div className="space-y-2">
+                            <input
+                              type="date"
+                              value={editForm.membershipDate ? new Date(editForm.membershipDate).toISOString().split('T')[0] : ''}
+                              onChange={(e) => handleInputChange('membershipDate', e.target.value)}
+                              className="block w-full border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-gray-900"
+                            />
+                            <input
+                              type="text"
+                              value={editForm.houseNumber || ''}
+                              onChange={(e) => handleInputChange('houseNumber', e.target.value)}
+                              className="block w-full border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-gray-900"
+                              placeholder="House Number"
+                            />
+                          </div>
+                        ) : (
+                          <div>
+                            <div className="text-sm text-gray-900">Since: {new Date(member.membershipDate).toLocaleDateString()}</div>
+                            <div className="text-sm text-gray-500">
+                              Status: <span className={member.isActive ? 'text-green-600' : 'text-red-600'}>
+                                {member.isActive ? 'Active' : 'Inactive'}
+                              </span>
                             </div>
-                          </td>
-                          <td className="px-6 py-4">
-                            <div className="space-y-2">
-                              <input
-                                type="text"
-                                value={editForm.phone || ''}
-                                onChange={(e) => setEditForm({...editForm, phone: e.target.value})}
-                                className="block w-full px-3 py-1 border border-gray-300 rounded-md text-sm"
-                                placeholder="Phone"
-                              />
-                              <input
-                                type="text"
-                                value={editForm.address || ''}
-                                onChange={(e) => setEditForm({...editForm, address: e.target.value})}
-                                className="block w-full px-3 py-1 border border-gray-300 rounded-md text-sm"
-                                placeholder="Address"
-                              />
-                              <input
-                                type="text"
-                                value={editForm.houseNumber || ''}
-                                onChange={(e) => setEditForm({...editForm, houseNumber: e.target.value})}
-                                className="block w-full px-3 py-1 border border-gray-300 rounded-md text-sm"
-                                placeholder="House Number"
-                              />
-                            </div>
-                          </td>
-                          <td className="px-6 py-4">
-                            <div className="space-y-2">
-                              <input
-                                type="text"
-                                value={editForm.nicNumber || ''}
-                                onChange={(e) => setEditForm({...editForm, nicNumber: e.target.value})}
-                                className="block w-full px-3 py-1 border border-gray-300 rounded-md text-sm"
-                                placeholder="NIC Number"
-                              />
-                              <input
-                                type="number"
-                                value={editForm.amount || 0}
-                                onChange={(e) => setEditForm({...editForm, amount: parseFloat(e.target.value) || 0})}
-                                className="block w-full px-3 py-1 border border-gray-300 rounded-md text-sm"
-                                placeholder="Amount"
-                              />
-                              <label className="flex items-center space-x-2">
-                                <input
-                                  type="checkbox"
-                                  checked={editForm.isActive !== false}
-                                  onChange={(e) => setEditForm({...editForm, isActive: e.target.checked})}
-                                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                                />
-                                <span className="text-sm">Active</span>
-                              </label>
-                            </div>
-                          </td>
-                          <td className="px-6 py-4">
-                            <div className="flex space-x-2">
-                              <button
-                                onClick={async () => {
-                                  try {
-                                    await localDB.updateUser(member.id, editForm);
-                                    setEditingMember(null);
-                                    setEditForm({});
-                                    await loadData();
-                                  } catch (error) {
-                                    alert('Failed to update user');
-                                  }
-                                }}
-                                className="flex items-center space-x-1 px-2 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700"
-                              >
-                                <Save className="w-4 h-4" />
-                                <span>Save</span>
-                              </button>
-                              <button
-                                onClick={() => {
-                                  setEditingMember(null);
-                                  setEditForm({});
-                                }}
-                                className="flex items-center space-x-1 px-2 py-1 bg-gray-600 text-white rounded text-sm hover:bg-gray-700"
-                              >
-                                <X className="w-4 h-4" />
-                                <span>Cancel</span>
-                              </button>
-                            </div>
-                          </td>
-                        </>
-                      ) : (
-                        // View Mode Row
-                        <>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="flex items-center space-x-3">
-                              <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
-                                <span className="text-blue-600 font-medium text-sm">
-                                  {member.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase()}
-                                </span>
-                              </div>
-                              <div>
-                                <div className="text-sm font-medium text-gray-900">{member.name}</div>
-                                <div className="text-sm text-gray-500">{member.email}</div>
-                                <div className="text-xs text-gray-400">
-                                  <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                                    member.role === 'admin' ? 'bg-purple-100 text-purple-800' : 'bg-green-100 text-green-800'
-                                  }`}>
-                                    {member.role}
-                                  </span>
-                                </div>
-                              </div>
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <div>
-                              <div className="text-sm text-gray-900">{member.phone}</div>
-                              <div className="text-sm text-gray-500">{member.address}</div>
-                              {member.houseNumber && (
-                                <div className="text-xs text-gray-400">House: {member.houseNumber}</div>
-                              )}
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <div>
-                              <div className="text-sm text-gray-900">NIC: {member.nicNumber}</div>
-                              <div className="text-sm text-gray-500">Amount: Rs. {member.amount || 0}</div>
-                              <div className="text-sm">
-                                Status: <span className={member.isActive ? 'text-green-600' : 'text-red-600'}>
-                                  {member.isActive ? 'Active' : 'Inactive'}
-                                </span>
-                              </div>
-                              {lockedUsers.includes(member.id) && (
-                                <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
-                                  Locked
-                                </span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="flex space-x-2">
-                              <button
-                                onClick={() => {
-                                  setEditingMember(member.id);
-                                  setEditForm(member);
-                                }}
-                                className="flex items-center space-x-1 px-2 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700"
-                              >
-                                <Edit className="w-4 h-4" />
-                                <span>Edit</span>
-                              </button>
-                              <button
-                                onClick={async () => {
-                                  if (confirm(`Are you sure you want to delete ${member.name}?`)) {
-                                    try {
-                                      await localDB.deleteUser(member.id);
-                                      await loadData();
-                                    } catch (error) {
-                                      alert('Failed to delete user');
-                                    }
-                                  }
-                                }}
-                                className="flex items-center space-x-1 px-2 py-1 bg-red-600 text-white rounded text-sm hover:bg-red-700"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                                <span>Delete</span>
-                              </button>
-                            </div>
-                          </td>
-                        </>
-                      )}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                        {editingMember === member.id ? (
+                          <div className="flex space-x-2">
+                            <button
+                              onClick={handleSaveMember}
+                              className="inline-flex items-center px-3 py-1 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700"
+                            >
+                              <Save className="w-4 h-4 mr-1" />
+                              Save
+                            </button>
+                            <button
+                              onClick={handleCancelEdit}
+                              className="inline-flex items-center px-3 py-1 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
+                            >
+                              <X className="w-4 h-4 mr-1" />
+                              Cancel
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex space-x-2">
+                            <button
+                              onClick={() => handleEditMember(member.id)}
+                              className="inline-flex items-center px-3 py-1 border border-transparent text-sm font-medium rounded-md text-blue-600 bg-blue-100 hover:bg-blue-200"
+                            >
+                              <Edit className="w-4 h-4 mr-1" />
+                              Edit
+                            </button>
+                            <button
+                              onClick={() => handleDeleteMember(member.id, member.name)}
+                              className="inline-flex items-center px-3 py-1 border border-transparent text-sm font-medium rounded-md text-red-600 bg-red-100 hover:bg-red-200"
+                            >
+                              <Trash2 className="w-4 h-4 mr-1" />
+                              Delete
+                            </button>
+                          </div>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -1025,703 +1479,628 @@ Health Check: ${healthCheck.isHealthy ? 'HEALTHY' : 'ISSUES FOUND'}`;
           </div>
         )}
 
-        {/* Login History Tab */}
-        {activeTab === 'loginHistory' && (
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200">
-            <div className="px-6 py-4 border-b border-gray-200">
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-xl font-bold">Login History</h2>
-                <div className="flex items-center space-x-4">
-                  <select
-                    value={historyDays}
-                    onChange={(e) => setHistoryDays(parseInt(e.target.value))}
-                    className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value={7}>Last 7 days</option>
-                    <option value={30}>Last 30 days</option>
-                    <option value={90}>Last 90 days</option>
-                  </select>
-                  
-                  <select
-                    value={historyRoleFilter}
-                    onChange={(e) => setHistoryRoleFilter(e.target.value)}
-                    className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="all">All Users</option>
-                    <option value="admin">Admin Only</option>
-                    <option value="member">Members Only</option>
-                  </select>
-                  
+        {/* Add Member Modal */}
+        {showAddMemberModal && (
+          <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50 flex items-center justify-center p-4">
+            <div className="relative bg-white rounded-md shadow-lg w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+              <div className="p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-medium text-gray-900">Add New Member</h3>
                   <button
-                    onClick={() => downloadLoginHistory('csv')}
-                    className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                    onClick={handleCancelAddMember}
+                    className="text-gray-400 hover:text-gray-600"
                   >
-                    <Download className="w-4 h-4" />
-                    <span>Download CSV</span>
+                    <X className="w-6 h-6" />
+                  </button>
+                </div>
+                
+                <div className="mb-6">
+                  <h4 className="text-sm font-medium text-gray-700 mb-3">Profile Picture</h4>
+                  <div className="flex justify-center">
+                    <ProfilePicture 
+                      user={{
+                        id: 'temp',
+                        name: addMemberForm.name || 'New Member',
+                        email: addMemberForm.email || '',
+                        phone: addMemberForm.phone || '',
+                        nicNumber: addMemberForm.nicNumber || '',
+                        dateOfBirth: addMemberForm.dateOfBirth || new Date(),
+                        address: addMemberForm.address || '',
+                        role: addMemberForm.role || 'member',
+                        membershipDate: new Date(),
+                        isActive: true,
+                        profilePicture: addMemberForm.profilePicture
+                      } as User}
+                      onUpdate={(updatedUser) => {
+                        setAddMemberForm(prev => ({
+                          ...prev,
+                          profilePicture: updatedUser.profilePicture
+                        }));
+                      }}
+                      size="large"
+                    />
+                  </div>
+                </div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Full Name *
+                    </label>
+                    <input
+                      type="text"
+                      value={addMemberForm.name || ''}
+                      onChange={(e) => handleAddMemberInputChange('name', e.target.value)}
+                      className="w-full border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm px-3 py-2 text-gray-900"
+                      placeholder="Enter full name"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Email Address *
+                    </label>
+                    <input
+                      type="email"
+                      value={addMemberForm.email || ''}
+                      onChange={(e) => handleAddMemberInputChange('email', e.target.value)}
+                      className="w-full border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm px-3 py-2 text-gray-900"
+                      placeholder="Enter email address"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Phone Number *
+                    </label>
+                    <input
+                      type="tel"
+                      value={addMemberForm.phone || ''}
+                      onChange={(e) => handleAddMemberInputChange('phone', e.target.value)}
+                      className="w-full border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm px-3 py-2 text-gray-900"
+                      placeholder="+94xxxxxxxxx"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      NIC Number *
+                    </label>
+                    <input
+                      type="text"
+                      value={addMemberForm.nicNumber || ''}
+                      onChange={(e) => handleAddMemberInputChange('nicNumber', e.target.value)}
+                      className="w-full border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm px-3 py-2 text-gray-900"
+                      placeholder="Enter NIC number"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Date of Birth
+                    </label>
+                    <input
+                      type="date"
+                      value={addMemberForm.dateOfBirth ? new Date(addMemberForm.dateOfBirth).toISOString().split('T')[0] : ''}
+                      onChange={(e) => handleAddMemberInputChange('dateOfBirth', e.target.value)}
+                      className="w-full border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm px-3 py-2 text-gray-900"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      House Number
+                    </label>
+                    <input
+                      type="text"
+                      value={addMemberForm.houseNumber || ''}
+                      onChange={(e) => handleAddMemberInputChange('houseNumber', e.target.value)}
+                      className="w-full border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm px-3 py-2 text-gray-900"
+                      placeholder="e.g., A-101"
+                    />
+                  </div>
+                  
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Address
+                    </label>
+                    <textarea
+                      value={addMemberForm.address || ''}
+                      onChange={(e) => handleAddMemberInputChange('address', e.target.value)}
+                      className="w-full border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm px-3 py-2 text-gray-900"
+                      placeholder="Enter full address"
+                      rows={2}
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Role
+                    </label>
+                    <select
+                      value={addMemberForm.role || 'member'}
+                      onChange={(e) => handleAddMemberInputChange('role', e.target.value)}
+                      className="w-full border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm px-3 py-2 text-gray-900"
+                    >
+                      <option value="member">Member</option>
+                      <option value="admin">Admin</option>
+                    </select>
+                  </div>
+                  
+                  <div className="flex items-center">
+                    <label className="flex items-center space-x-2">
+                      <input
+                        type="checkbox"
+                        checked={addMemberForm.isActive !== undefined ? addMemberForm.isActive : true}
+                        onChange={(e) => handleAddMemberInputChange('isActive', e.target.checked)}
+                        className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className="text-sm text-gray-700">Active Member</span>
+                    </label>
+                  </div>
+                </div>
+                
+                <div className="flex justify-end space-x-3 mt-6 pt-4 border-t border-gray-200">
+                  <button
+                    onClick={handleCancelAddMember}
+                    className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleSaveNewMember}
+                    className="px-4 py-2 border border-transparent rounded-md text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                  >
+                    <Plus className="w-4 h-4 mr-2 inline" />
+                    Add Member
                   </button>
                 </div>
               </div>
-
-              {loginStats && (
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-                  <div className="bg-blue-50 p-4 rounded-lg">
-                    <p className="text-sm text-blue-600">Total Logins</p>
-                    <p className="text-2xl font-bold text-blue-900">{loginStats.totalLogins}</p>
-                  </div>
-                  <div className="bg-green-50 p-4 rounded-lg">
-                    <p className="text-sm text-green-600">Successful</p>
-                    <p className="text-2xl font-bold text-green-900">{loginStats.successfulLogins}</p>
-                  </div>
-                  <div className="bg-red-50 p-4 rounded-lg">
-                    <p className="text-sm text-red-600">Failed</p>
-                    <p className="text-2xl font-bold text-red-900">{loginStats.failedLogins}</p>
-                  </div>
-                  <div className="bg-purple-50 p-4 rounded-lg">
-                    <p className="text-sm text-purple-600">Unique Users</p>
-                    <p className="text-2xl font-bold text-purple-900">{loginStats.uniqueUsers}</p>
-                  </div>
-                </div>
-              )}
-            </div>
-            
-            <div className="p-6">
-              {historyLoading ? (
-                <div className="flex items-center justify-center py-8">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-                  <span className="ml-2 text-gray-600">Loading login history...</span>
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Timestamp</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Success</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">IP Address</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Failure Reason</th>
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                      {loginHistory.map((log) => (
-                        <tr key={log.id}>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {new Date(log.timestamp).toLocaleString()}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {log.email}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            {log.success ? (
-                              <CheckCircle className="w-5 h-5 text-green-600" />
-                            ) : (
-                              <XCircle className="w-5 h-5 text-red-600" />
-                            )}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {log.ip}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {log.failureReason || '-'}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
             </div>
           </div>
         )}
 
-        {/* Account Management Tab */}
-        {activeTab === 'accountManagement' && (
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200">
-            <div className="px-6 py-4 border-b border-gray-200">
+        {activeTab === 'whatsapp' && (
+          <div className="text-gray-900">
+            <WhatsAppComponent />
+          </div>
+        )}
+
+        {activeTab === 'accounts' && (
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <div className="flex justify-between items-center mb-6">
               <h2 className="text-lg font-semibold text-gray-900">Account Management</h2>
-              <p className="text-sm text-gray-600">Manage user account security and access</p>
+              <div className="flex space-x-3">
+                <button
+                  onClick={loadAccountIssues}
+                  className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                  disabled={accountLoading}
+                >
+                  {accountLoading ? 'Loading...' : 'Refresh'}
+                </button>
+                <button
+                  onClick={unlockAllAccounts}
+                  className="px-4 py-2 border border-transparent rounded-md text-sm font-medium text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
+                >
+                  Unlock All Accounts
+                </button>
+              </div>
             </div>
-            <div className="p-6">
-              <div className="space-y-6">
-                {/* Locked Users Section */}
-                <div>
-                  <h3 className="text-md font-medium text-gray-900 mb-4">Locked Accounts</h3>
-                  {lockedUsers.length > 0 ? (
-                    <div className="space-y-2">
-                      {lockedUsers.map(userId => {
-                        const user = members.find(m => m.id === userId);
-                        return user ? (
-                          <div key={userId} className="flex items-center justify-between p-3 bg-red-50 rounded-md border border-red-200">
-                            <div className="flex items-center space-x-3">
-                              <div className="w-8 h-8 bg-red-100 rounded-full flex items-center justify-center">
-                                <span className="text-red-600 font-medium text-sm">
-                                  {user.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase()}
-                                </span>
-                              </div>
-                              <div>
-                                <div className="text-sm font-medium text-gray-900">{user.name}</div>
-                                <div className="text-sm text-gray-600">{user.email}</div>
-                              </div>
-                            </div>
-                            <button
-                              onClick={() => {
-                                setLockedUsers(lockedUsers.filter(id => id !== userId));
-                                alert(`Account for ${user.name} has been unlocked.`);
-                              }}
-                              className="flex items-center space-x-1 px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700"
-                            >
-                              <CheckCircle className="w-4 h-4" />
-                              <span>Unlock</span>
-                            </button>
-                          </div>
-                        ) : null;
-                      })}
-                    </div>
-                  ) : (
-                    <div className="text-center py-6 text-gray-500">
-                      <Shield className="w-12 h-12 mx-auto text-gray-300 mb-4" />
-                      <p>No locked accounts</p>
-                    </div>
-                  )}
-                </div>
 
-                {/* Security Settings */}
-                <div>
-                  <h3 className="text-md font-medium text-gray-900 mb-4">Security Settings</h3>
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between p-4 border border-gray-200 rounded-md">
-                      <div>
-                        <h4 className="text-sm font-medium text-gray-900">Failed Login Attempts Limit</h4>
-                        <p className="text-sm text-gray-600">Users will be locked after this many failed attempts</p>
-                      </div>
-                      <select className="px-3 py-2 border border-gray-300 rounded-md text-sm">
-                        <option value="3">3 attempts</option>
-                        <option value="5" selected>5 attempts</option>
-                        <option value="10">10 attempts</option>
-                      </select>
-                    </div>
-                    
-                    <div className="flex items-center justify-between p-4 border border-gray-200 rounded-md">
-                      <div>
-                        <h4 className="text-sm font-medium text-gray-900">Auto-unlock Period</h4>
-                        <p className="text-sm text-gray-600">Automatically unlock accounts after this period</p>
-                      </div>
-                      <select className="px-3 py-2 border border-gray-300 rounded-md text-sm">
-                        <option value="15">15 minutes</option>
-                        <option value="30" selected>30 minutes</option>
-                        <option value="60">1 hour</option>
-                        <option value="0">Manual unlock only</option>
-                      </select>
-                    </div>
-                  </div>
+            {/* Search Bar */}
+            <div className="mb-4">
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <Search className="h-5 w-5 text-gray-400" />
                 </div>
+                <input
+                  type="text"
+                  value={accountSearchTerm}
+                  onChange={(e) => setAccountSearchTerm(e.target.value)}
+                  className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                  placeholder="Search accounts by user ID, name, or email..."
+                />
+              </div>
+            </div>
 
-                {/* Test Lock Account */}
-                <div>
-                  <h3 className="text-md font-medium text-gray-900 mb-4">Test Account Lock</h3>
-                  <div className="flex items-center space-x-3">
-                    <select 
-                      className="px-3 py-2 border border-gray-300 rounded-md text-sm"
-                      onChange={(e) => {
-                        if (e.target.value && !lockedUsers.includes(e.target.value)) {
-                          setLockedUsers([...lockedUsers, e.target.value]);
-                          const user = members.find(m => m.id === e.target.value);
-                          alert(`Account for ${user?.name} has been locked for testing.`);
-                        }
-                        e.target.value = '';
-                      }}
-                    >
-                      <option value="">Select user to lock...</option>
-                      {members.filter(m => !lockedUsers.includes(m.id)).map(member => (
-                        <option key={member.id} value={member.id}>{member.name} ({member.email})</option>
-                      ))}
-                    </select>
+            {accountLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                <span className="ml-2 text-gray-600">Loading account information...</span>
+              </div>
+            ) : (
+              <>
+                {filteredAccountIssues.length === 0 ? (
+                  <div className="text-center py-8">
+                    {accountIssues.length === 0 ? (
+                      <>
+                        <AlertCircle className="mx-auto h-12 w-12 text-green-400" />
+                        <h3 className="mt-2 text-sm font-medium text-gray-900">No Account Issues</h3>
+                        <p className="mt-1 text-sm text-gray-500">
+                          All user accounts are functioning normally. No locked accounts or password issues found.
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <Search className="mx-auto h-12 w-12 text-gray-400" />
+                        <h3 className="mt-2 text-sm font-medium text-gray-900">No Matching Accounts</h3>
+                        <p className="mt-1 text-sm text-gray-500">
+                          No accounts found matching your search criteria. Try a different search term.
+                        </p>
+                      </>
+                    )}
                   </div>
-                </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">User</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Issues</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Failed Attempts</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {filteredAccountIssues.map((issue) => (
+                          <tr key={issue.userId}>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <div className="text-sm font-medium text-gray-900">
+                                {issue.user ? issue.user.name : issue.userId}
+                              </div>
+                              <div className="text-sm text-gray-500">
+                                ID: {issue.userId}
+                              </div>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <div className="text-sm text-gray-900">
+                                {issue.user ? issue.user.email : 'N/A'}
+                              </div>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <div className="flex flex-col space-y-1">
+                                {issue.isLocked && (
+                                  <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
+                                    🔒 Account Locked
+                                  </span>
+                                )}
+                                {issue.isTemporary && (
+                                  <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800">
+                                    🔑 Temporary Password
+                                  </span>
+                                )}
+                                {issue.failedAttempts > 0 && !issue.isLocked && (
+                                  <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-orange-100 text-orange-800">
+                                    ⚠️ Login Attempts
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <div className="text-sm text-gray-900">
+                                {issue.failedAttempts}
+                                {issue.lockedUntil && (
+                                  <div className="text-xs text-gray-500">
+                                    Locked until: {new Date(issue.lockedUntil).toLocaleString()}
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                              <div className="flex space-x-2">
+                                {issue.isLocked && (
+                                  <button
+                                    onClick={() => unlockAccount(issue.userId)}
+                                    className="inline-flex items-center px-3 py-1 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700"
+                                  >
+                                    Unlock
+                                  </button>
+                                )}
+                                {issue.user && (
+                                  <button
+                                    onClick={() => resetPasswordToNIC(issue.userId, issue.user.nicNumber)}
+                                    className="inline-flex items-center px-3 py-1 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
+                                  >
+                                    Reset to NIC
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* Account Management Information */}
+            <div className="mt-8 bg-blue-50 rounded-lg p-4">
+              <h4 className="text-sm font-medium text-blue-900 mb-2">Account Management Guide</h4>
+              <div className="text-sm text-blue-800 space-y-1">
+                <p>• <strong>Unlock Account:</strong> Removes account lockout and resets failed login attempts</p>
+                <p>• <strong>Reset to NIC:</strong> Resets user password to their NIC number (temporary password)</p>
+                <p>• <strong>Unlock All:</strong> Emergency function to unlock all locked accounts in the system</p>
+                <p>• <strong>Temporary Password:</strong> Users with temporary passwords must change them on first login</p>
               </div>
             </div>
           </div>
         )}
 
-        {/* WhatsApp Tab */}
-        {activeTab === 'whatsapp' && (
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200">
-            <div className="px-6 py-4 border-b border-gray-200">
-              <h2 className="text-lg font-semibold text-gray-900">WhatsApp Integration</h2>
-              <p className="text-sm text-gray-600">Configure WhatsApp notifications for payment reminders</p>
+        {activeTab === 'loginHistory' && (
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
+              <h2 className="text-lg font-semibold text-gray-900 flex items-center">
+                <Clock className="w-5 h-5 mr-2 text-blue-600" />
+                Login History
+              </h2>
+              <div className="flex flex-wrap gap-2">
+                {/* Time Period Filter */}
+                <select
+                  value={historyDays}
+                  onChange={(e) => handleHistoryFilterChange(parseInt(e.target.value), historyRoleFilter)}
+                  className="px-3 py-2 border border-gray-300 rounded-md text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value={1}>Last 24 hours</option>
+                  <option value={7}>Last 7 days</option>
+                  <option value={30}>Last 30 days</option>
+                  <option value={90}>Last 90 days</option>
+                </select>
+                
+                {/* Role Filter */}
+                <select
+                  value={historyRoleFilter}
+                  onChange={(e) => handleHistoryFilterChange(historyDays, e.target.value)}
+                  className="px-3 py-2 border border-gray-300 rounded-md text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value="all">All Users</option>
+                  <option value="admin">Admins Only</option>
+                  <option value="member">Members Only</option>
+                </select>
+                
+                {/* Refresh Button */}
+                <button
+                  onClick={refreshLoginHistory}
+                  className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 flex items-center"
+                  disabled={historyLoading}
+                >
+                  <RefreshCw className={`w-4 h-4 mr-2 ${historyLoading ? 'animate-spin' : ''}`} />
+                  {historyLoading ? 'Loading...' : 'Refresh'}
+                </button>
+                
+                {/* Download Buttons */}
+                <button
+                  onClick={() => downloadLoginHistory('csv')}
+                  className="px-4 py-2 border border-transparent rounded-md text-sm font-medium text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 flex items-center"
+                  disabled={historyLoading || loginHistory.length === 0}
+                  title="Download as CSV file"
+                >
+                  <Download className="w-4 h-4 mr-2" />
+                  CSV
+                </button>
+                
+                <button
+                  onClick={() => downloadLoginHistory('json')}
+                  className="px-4 py-2 border border-transparent rounded-md text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 flex items-center"
+                  disabled={historyLoading || loginHistory.length === 0}
+                  title="Download as JSON file"
+                >
+                  <Download className="w-4 h-4 mr-2" />
+                  JSON
+                </button>
+              </div>
             </div>
-            <div className="p-6">
-              <div className="space-y-6">
-                {/* WhatsApp Settings */}
-                <div>
-                  <h3 className="text-md font-medium text-gray-900 mb-4">Settings</h3>
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between p-4 border border-gray-200 rounded-md">
-                      <div>
-                        <h4 className="text-sm font-medium text-gray-900">Enable WhatsApp Notifications</h4>
-                        <p className="text-sm text-gray-600">Send automated payment reminders via WhatsApp</p>
-                      </div>
-                      <label className="relative inline-flex items-center cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={whatsappSettings.enabled}
-                          onChange={(e) => setWhatsappSettings({...whatsappSettings, enabled: e.target.checked})}
-                          className="sr-only peer"
-                        />
-                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-                      </label>
-                    </div>
 
+            {/* Statistics Cards */}
+            {loginStats && (
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
+                <div className="bg-blue-50 p-4 rounded-lg">
+                  <div className="flex items-center justify-between">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        WhatsApp Business API Phone Number
-                      </label>
-                      <input
-                        type="text"
-                        value={whatsappSettings.phoneNumber}
-                        onChange={(e) => setWhatsappSettings({...whatsappSettings, phoneNumber: e.target.value})}
-                        placeholder="+94xxxxxxxxx"
-                        className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                      />
+                      <p className="text-xs font-medium text-blue-600">Total Logins</p>
+                      <p className="text-xl font-bold text-blue-700">{loginStats.totalLogins}</p>
                     </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        API Key
-                      </label>
-                      <input
-                        type="password"
-                        value={whatsappSettings.apiKey}
-                        onChange={(e) => setWhatsappSettings({...whatsappSettings, apiKey: e.target.value})}
-                        placeholder="Enter your WhatsApp Business API key"
-                        className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Message Template
-                      </label>
-                      <textarea
-                        rows={4}
-                        value={whatsappSettings.template}
-                        onChange={(e) => setWhatsappSettings({...whatsappSettings, template: e.target.value})}
-                        placeholder="Hello {name}, your payment of LKR {amount} is due."
-                        className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                      />
-                      <p className="text-xs text-gray-500 mt-1">
-                        Available variables: {'{name}'}, {'{amount}'}, {'{dueDate}'}, {'{houseNumber}'}
-                      </p>
-                    </div>
+                    <Eye className="w-6 h-6 text-blue-600" />
                   </div>
                 </div>
-
-                {/* Test WhatsApp */}
-                <div>
-                  <h3 className="text-md font-medium text-gray-900 mb-4">Test Message</h3>
-                  <div className="flex items-center space-x-3">
-                    <select className="px-3 py-2 border border-gray-300 rounded-md text-sm">
-                      <option value="">Select user to send test message...</option>
-                      {members.map(member => (
-                        <option key={member.id} value={member.id}>{member.name} ({member.phone})</option>
-                      ))}
-                    </select>
-                    <button
-                      onClick={() => alert('Test message sent! (Demo mode - no actual message sent)')}
-                      className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors"
-                      disabled={!whatsappSettings.enabled}
-                    >
-                      <MessageSquare className="w-4 h-4 inline mr-2" />
-                      Send Test
-                    </button>
+                
+                <div className="bg-green-50 p-4 rounded-lg">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-medium text-green-600">Successful</p>
+                      <p className="text-xl font-bold text-green-700">{loginStats.successfulLogins}</p>
+                    </div>
+                    <CheckCircle className="w-6 h-6 text-green-600" />
                   </div>
                 </div>
-
-                {/* Bulk Send */}
-                <div>
-                  <h3 className="text-md font-medium text-gray-900 mb-4">Bulk Notifications</h3>
-                  <div className="space-y-3">
-                    <div className="flex space-x-3">
-                      <button
-                        onClick={() => alert('Payment reminders sent to all overdue members! (Demo mode)')}
-                        className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-                        disabled={!whatsappSettings.enabled}
-                      >
-                        Send Overdue Reminders
-                      </button>
-                      <button
-                        onClick={() => alert('Payment confirmations sent to all paid members! (Demo mode)')}
-                        className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors"
-                        disabled={!whatsappSettings.enabled}
-                      >
-                        Send Payment Confirmations
-                      </button>
+                
+                <div className="bg-red-50 p-4 rounded-lg">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-medium text-red-600">Failed</p>
+                      <p className="text-xl font-bold text-red-700">{loginStats.failedLogins}</p>
                     </div>
-                    <p className="text-sm text-gray-600">
-                      Note: This is a demo environment. In production, these would integrate with WhatsApp Business API.
+                    <XCircle className="w-6 h-6 text-red-600" />
+                  </div>
+                </div>
+                
+                <div className="bg-purple-50 p-4 rounded-lg">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-medium text-purple-600">Unique Users</p>
+                      <p className="text-xl font-bold text-purple-700">{loginStats.uniqueUsers}</p>
+                    </div>
+                    <Users className="w-6 h-6 text-purple-600" />
+                  </div>
+                </div>
+                
+                <div className="bg-orange-50 p-4 rounded-lg">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-medium text-orange-600">Admin Logins</p>
+                      <p className="text-xl font-bold text-orange-700">{loginStats.adminLogins}</p>
+                    </div>
+                    <Shield className="w-6 h-6 text-orange-600" />
+                  </div>
+                </div>
+                
+                <div className="bg-gray-50 p-4 rounded-lg">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-medium text-gray-600">Avg Session</p>
+                      <p className="text-xl font-bold text-gray-700">{loginStats.averageSessionDuration}m</p>
+                    </div>
+                    <Clock className="w-6 h-6 text-gray-600" />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Login History Table */}
+            {historyLoading && loginHistory.length === 0 ? (
+              <div className="flex items-center justify-center py-8">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                <span className="ml-2 text-gray-600">Loading login history...</span>
+              </div>
+            ) : (
+              <>
+                {loginHistory.length === 0 ? (
+                  <div className="text-center py-8">
+                    <Clock className="mx-auto h-12 w-12 text-gray-400" />
+                    <h3 className="mt-2 text-sm font-medium text-gray-900">No Login History</h3>
+                    <p className="mt-1 text-sm text-gray-500">
+                      No login attempts found for the selected time period and filters.
                     </p>
                   </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Cloud Sync Tab */}
-        {activeTab === 'cloudSync' && (
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200">
-            <div className="px-6 py-4 border-b border-gray-200">
-              <h2 className="text-lg font-semibold text-gray-900">Cloud Synchronization</h2>
-              <p className="text-sm text-gray-600">Automatic cross-device data synchronization</p>
-            </div>
-            <div className="p-6">
-              <div className="space-y-6">
-                {/* Cloud Sync Status */}
-                <div>
-                  <h3 className="text-md font-medium text-gray-900 mb-4">Sync Status</h3>
-                  <div className="space-y-4">
-                    <div className="p-4 bg-blue-50 border border-blue-200 rounded-md">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <h4 className="text-sm font-medium text-blue-900">Automatic Cloud Sync</h4>
-                          <p className="text-sm text-blue-700 mt-1">
-                            {(() => {
-                              const status = localDB.getCloudSyncStatus();
-                              return status.enabled 
-                                ? `✅ Enabled - Last sync: ${status.lastSync ? new Date(status.lastSync).toLocaleString() : 'Never'}`
-                                : '❌ Disabled - Click to enable automatic cross-device sync';
-                            })()}
-                          </p>
-                        </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">User</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date & Time</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">IP Address</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Session</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {loginHistory.map((entry) => (
+                          <tr key={entry.id} className="hover:bg-gray-50">
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <div className="flex items-center">
+                                <div className="flex-shrink-0">
+                                  {entry.userRole === 'admin' ? (
+                                    <Shield className="w-8 h-8 text-orange-600" />
+                                  ) : (
+                                    <Users className="w-8 h-8 text-blue-600" />
+                                  )}
+                                </div>
+                                <div className="ml-4">
+                                  <div className="text-sm font-medium text-gray-900">
+                                    {entry.userName}
+                                  </div>
+                                  <div className="text-sm text-gray-500">
+                                    {entry.userEmail}
+                                  </div>
+                                  <div className="text-xs text-gray-400">
+                                    {entry.userRole.toUpperCase()}
+                                  </div>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              {entry.success ? (
+                                <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
+                                  ✅ Success
+                                </span>
+                              ) : (
+                                <div className="flex flex-col">
+                                  <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
+                                    ❌ Failed
+                                  </span>
+                                  {entry.failureReason && (
+                                    <span className="text-xs text-gray-500 mt-1">
+                                      {entry.failureReason}
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <div className="text-sm text-gray-900">
+                                {new Date(entry.timestamp).toLocaleDateString()}
+                              </div>
+                              <div className="text-sm text-gray-500">
+                                {new Date(entry.timestamp).toLocaleTimeString()}
+                              </div>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <div className="text-sm text-gray-900">
+                                {entry.ipAddress || 'Unknown'}
+                              </div>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <div className="text-sm text-gray-900">
+                                {entry.sessionDuration ? (
+                                  <span className="text-green-600">
+                                    {entry.sessionDuration} minutes
+                                  </span>
+                                ) : entry.success ? (
+                                  <span className="text-yellow-600">
+                                    Active
+                                  </span>
+                                ) : (
+                                  <span className="text-gray-400">
+                                    N/A
+                                  </span>
+                                )}
+                              </div>
+                              {entry.logoutTime && (
+                                <div className="text-xs text-gray-500">
+                                  Logged out: {new Date(entry.logoutTime).toLocaleTimeString()}
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    
+                    {/* Load More Button */}
+                    {historyHasMore && (
+                      <div className="flex justify-center mt-6">
                         <button
-                          onClick={async () => {
-                            try {
-                              const status = localDB.getCloudSyncStatus();
-                              if (status.enabled) {
-                                await localDB.disableCloudSync();
-                                alert('Cloud sync disabled');
-                              } else {
-                                const result = await localDB.enableCloudSync();
-                                if (result.success) {
-                                  alert(`Cloud sync enabled!\n\nShare this URL to sync data to other devices:\n${result.url}\n\nData will automatically sync every few minutes.`);
-                                } else {
-                                  alert(result.message);
-                                }
-                              }
-                              window.location.reload(); // Refresh to update status
-                            } catch (error) {
-                              alert('Failed to toggle cloud sync');
-                            }
-                          }}
-                          className={`px-4 py-2 rounded-md text-white transition-colors ${
-                            localDB.getCloudSyncStatus().enabled
-                              ? 'bg-red-600 hover:bg-red-700'
-                              : 'bg-green-600 hover:bg-green-700'
-                          }`}
+                          onClick={loadMoreHistory}
+                          className="px-6 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                          disabled={historyLoading}
                         >
-                          {localDB.getCloudSyncStatus().enabled ? 'Disable' : 'Enable'} Cloud Sync
+                          {historyLoading ? 'Loading...' : 'Load More'}
                         </button>
                       </div>
-                      {localDB.getCloudSyncStatus().url && (
-                        <div className="mt-4 p-3 bg-blue-100 rounded border text-xs">
-                          <strong>Share URL:</strong>
-                          <div className="mt-1 p-2 bg-white rounded border font-mono text-blue-800 break-all">
-                            {localDB.getCloudSyncStatus().url}
-                          </div>
-                          <button
-                            onClick={() => {
-                              navigator.clipboard.writeText(localDB.getCloudSyncStatus().url || '');
-                              alert('Share URL copied to clipboard!');
-                            }}
-                            className="mt-2 px-3 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700"
-                          >
-                            Copy URL
-                          </button>
-                        </div>
-                      )}
-                    </div>
+                    )}
                   </div>
-                </div>
+                )}
+              </>
+            )}
 
-                {/* Import from Cloud */}
-                <div>
-                  <h3 className="text-md font-medium text-gray-900 mb-4">Import from Another Device</h3>
-                  <div className="space-y-4">
-                    <div className="p-4 bg-green-50 border border-green-200 rounded-md">
-                      <h4 className="text-sm font-medium text-green-900 mb-2">Sync from Cloud URL</h4>
-                      <p className="text-sm text-green-700 mb-3">
-                        Enter a cloud sync URL from another device to import and merge data automatically.
-                      </p>
-                      <div className="space-y-3">
-                        <input
-                          type="url"
-                          placeholder="Paste cloud sync URL here..."
-                          className="w-full px-3 py-2 border border-green-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
-                          onKeyPress={async (e) => {
-                            if (e.key === 'Enter') {
-                              const input = e.target as HTMLInputElement;
-                              const url = input.value.trim();
-                              if (url) {
-                                try {
-                                  const result = await localDB.importFromCloudUrl(url);
-                                  alert(result.message);
-                                  if (result.success) {
-                                    input.value = '';
-                                    await loadData(); // Reload data
-                                    window.location.reload(); // Refresh to update UI
-                                  }
-                                } catch (error) {
-                                  alert('Failed to import from cloud URL');
-                                }
-                              }
-                            }
-                          }}
-                        />
-                        <p className="text-xs text-green-600">
-                          Press Enter to import. This will merge data from the cloud with your local data.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Manual Sync */}
-                <div>
-                  <h3 className="text-md font-medium text-gray-900 mb-4">Manual Actions</h3>
-                  <div className="flex space-x-4">
-                    <button
-                      onClick={async () => {
-                        try {
-                          const result = await localDB.forceCloudSync();
-                          alert(result.message);
-                        } catch (error) {
-                          alert('Failed to sync to cloud');
-                        }
-                      }}
-                      className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-                    >
-                      <RefreshCw className="w-4 h-4" />
-                      <span>Sync Now</span>
-                    </button>
-                    
-                    <button
-                      onClick={checkDatabaseStatus}
-                      className="flex items-center space-x-2 px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition-colors"
-                    >
-                      <Eye className="w-4 h-4" />
-                      <span>Check Status</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* How it Works */}
-                <div>
-                  <h3 className="text-md font-medium text-gray-900 mb-4">How Cloud Sync Works</h3>
-                  <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-md">
-                    <div className="space-y-3 text-sm text-yellow-800">
-                      <p><strong>Automatic Cross-Device Synchronization:</strong></p>
-                      <ul className="list-disc list-inside space-y-1 ml-4">
-                        <li>✅ Your data automatically backs up to the cloud every time you make changes</li>
-                        <li>✅ Share the cloud URL with other devices to enable automatic syncing</li>
-                        <li>✅ All devices stay in sync automatically - no manual uploading needed</li>
-                        <li>✅ Data is encrypted and secure</li>
-                        <li>✅ Works across phones, tablets, and computers</li>
-                      </ul>
-                      <p className="text-xs mt-3">
-                        <strong>Note:</strong> Cloud sync is free and uses GitHub's infrastructure for reliability.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Storage Stats */}
-                <div>
-                  <h3 className="text-md font-medium text-gray-900 mb-4">Storage Information</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="p-4 bg-gray-50 border border-gray-200 rounded-md">
-                      <div className="text-2xl font-bold text-gray-900">{members.length}</div>
-                      <div className="text-sm text-gray-600">Total Users</div>
-                    </div>
-                    <div className="p-4 bg-gray-50 border border-gray-200 rounded-md">
-                      <div className="text-2xl font-bold text-gray-900">{loginHistory.length}</div>
-                      <div className="text-sm text-gray-600">Login Records</div>
-                    </div>
-                    <div className="p-4 bg-gray-50 border border-gray-200 rounded-md">
-                      <div className="text-2xl font-bold text-gray-900">
-                        {Math.round((localStorage.getItem('community_fee_data')?.length || 0) / 1024)}KB
-                      </div>
-                      <div className="text-sm text-gray-600">Storage Used</div>
-                    </div>
-                  </div>
-                </div>
+            {/* Login History Information */}
+            <div className="mt-8 bg-blue-50 rounded-lg p-4">
+              <h4 className="text-sm font-medium text-blue-900 mb-2">Login History Information</h4>
+              <div className="text-sm text-blue-800 space-y-1">
+                <p>• <strong>Session Duration:</strong> Time between login and logout (Active means still logged in)</p>
+                <p>• <strong>Failed Attempts:</strong> Includes invalid email, wrong password, and locked accounts</p>
+                <p>• <strong>IP Address:</strong> Client IP address where the login attempt originated</p>
+                <p>• <strong>Data Retention:</strong> Login history is kept for 30 days and then automatically cleaned up</p>
+                <p>• <strong>Download Options:</strong> Export current filtered data as CSV (Excel compatible) or JSON format</p>
+                <p>• <strong>File Names:</strong> Downloads include date, time period, and role filter in filename</p>
               </div>
             </div>
           </div>
         )}
       </div>
-
-      {/* Add Member Modal */}
-      {showAddMemberModal && (
-        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-          <div className="relative top-20 mx-auto p-5 border w-11/12 max-w-2xl shadow-lg rounded-md bg-white">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-900">Add New Member</h3>
-              <button
-                onClick={() => setShowAddMemberModal(false)}
-                className="text-gray-400 hover:text-gray-600"
-              >
-                <X className="w-6 h-6" />
-              </button>
-            </div>
-            
-            <form
-              onSubmit={async (e) => {
-                e.preventDefault();
-                try {
-                  await localDB.addUser({
-                    ...addMemberForm,
-                    id: `user_${Date.now()}`,
-                    password: localDB.hashPassword(addMemberForm.phone || '123456'),
-                    createdAt: new Date().toISOString(),
-                    updatedAt: new Date().toISOString()
-                  } as User);
-                  
-                  setShowAddMemberModal(false);
-                  setAddMemberForm({
-                    name: '',
-                    email: '',
-                    phone: '',
-                    nicNumber: '',
-                    dateOfBirth: new Date(),
-                    address: '',
-                    role: 'member',
-                    houseNumber: '',
-                    isActive: true
-                  });
-                  await loadData();
-                  alert('Member added successfully!');
-                } catch (error) {
-                  alert('Failed to add member. Please check all fields.');
-                }
-              }}
-              className="space-y-4"
-            >
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Name *</label>
-                  <input
-                    type="text"
-                    required
-                    value={addMemberForm.name}
-                    onChange={(e) => setAddMemberForm({...addMemberForm, name: e.target.value})}
-                    className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Email *</label>
-                  <input
-                    type="email"
-                    required
-                    value={addMemberForm.email}
-                    onChange={(e) => setAddMemberForm({...addMemberForm, email: e.target.value})}
-                    className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Phone *</label>
-                  <input
-                    type="text"
-                    required
-                    value={addMemberForm.phone}
-                    onChange={(e) => setAddMemberForm({...addMemberForm, phone: e.target.value})}
-                    className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">NIC Number</label>
-                  <input
-                    type="text"
-                    value={addMemberForm.nicNumber}
-                    onChange={(e) => setAddMemberForm({...addMemberForm, nicNumber: e.target.value})}
-                    className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Address</label>
-                  <input
-                    type="text"
-                    value={addMemberForm.address}
-                    onChange={(e) => setAddMemberForm({...addMemberForm, address: e.target.value})}
-                    className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">House Number</label>
-                  <input
-                    type="text"
-                    value={addMemberForm.houseNumber}
-                    onChange={(e) => setAddMemberForm({...addMemberForm, houseNumber: e.target.value})}
-                    className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
-                  <select
-                    value={addMemberForm.role}
-                    onChange={(e) => setAddMemberForm({...addMemberForm, role: e.target.value as 'admin' | 'member'})}
-                    className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                  >
-                    <option value="member">Member</option>
-                    <option value="admin">Admin</option>
-                  </select>
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Amount</label>
-                  <input
-                    type="number"
-                    value={addMemberForm.amount || 0}
-                    onChange={(e) => setAddMemberForm({...addMemberForm, amount: parseFloat(e.target.value) || 0})}
-                    className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                  />
-                </div>
-              </div>
-              
-              <div className="flex items-center">
-                <input
-                  type="checkbox"
-                  checked={addMemberForm.isActive !== false}
-                  onChange={(e) => setAddMemberForm({...addMemberForm, isActive: e.target.checked})}
-                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                />
-                <label className="ml-2 text-sm text-gray-700">Active Member</label>
-              </div>
-              
-              <div className="flex justify-end space-x-3 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setShowAddMemberModal(false)}
-                  className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-                >
-                  Add Member
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
