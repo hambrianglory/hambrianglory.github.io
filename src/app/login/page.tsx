@@ -26,11 +26,11 @@ export default function LoginPage() {
     setError('');
 
     try {
-      // Use full URL for Netlify deployment
-      const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || window.location.origin;
-      const apiUrl = `${baseUrl}/api/auth/login`;
+      // Use relative URL for API calls - Netlify will handle routing
+      const apiUrl = '/api/auth/login';
       
       console.log('Attempting login to:', apiUrl); // Debug log
+      console.log('Current origin:', typeof window !== 'undefined' ? window.location.origin : 'SSR');
       
       const response = await fetch(apiUrl, {
         method: 'POST',
