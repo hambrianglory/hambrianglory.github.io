@@ -25,8 +25,8 @@ const nextConfig: NextConfig = {
   },
   // Netlify deployment configuration
   trailingSlash: false,
-  // Configure output for Netlify
-  output: 'standalone',
+  // Remove standalone output for Netlify
+  // output: 'standalone', // Disabled for Netlify
 };
 
 export default nextConfig;

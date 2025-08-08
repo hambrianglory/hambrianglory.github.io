@@ -3,11 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --turbopack",
+    "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
-    "netlify": "npm run build",
+    "lint": "next lint --fix",
+    "netlify-build": "npm ci && npm run build",
     "export": "next export"
   },
   "dependencies": {
