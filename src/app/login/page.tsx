@@ -26,7 +26,13 @@ export default function LoginPage() {
     setError('');
 
     try {
-      const response = await fetch('/api/auth/login', {
+      // Use full URL for Netlify deployment
+      const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || window.location.origin;
+      const apiUrl = `${baseUrl}/api/auth/login`;
+      
+      console.log('Attempting login to:', apiUrl); // Debug log
+      
+      const response = await fetch(apiUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -34,9 +40,16 @@ export default function LoginPage() {
         body: JSON.stringify({ email, password }),
       });
 
-      const data = await response.json();
+      console.log('Response status:', response.status); // Debug log
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
 
-      if (response.ok) {
+      const data = await response.json();
+      console.log('Response data:', data); // Debug log
+
+      if (data.success) {
         if (data.requiresPasswordChange) {
           setRequiresPasswordChange(true);
           setError('You are using a temporary password. Please change it to continue.');
@@ -50,10 +63,11 @@ export default function LoginPage() {
           }
         }
       } else {
-        setError(data.message || 'Login failed');
+        setError(data.error || 'Login failed');
       }
     } catch (error) {
-      setError('Network error. Please try again.');
+      console.error('Login error:', error); // Debug log
+      setError(`Network error: ${error.message}. Please check if environment variables are set.`);
     } finally {
       setLoading(false);
     }
