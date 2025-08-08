@@ -47,9 +47,11 @@ git push -u origin main
 1. **Go to Netlify**: https://app.netlify.com
 2. **Click "New site from Git"**
 3. **Choose GitHub** and authorize
-4. **Select your repository**: `community-fee-management`
+4. **Select your repository**: `hambrianglory.github.io`
 5. **Configure build settings**:
-   - **Build command**: `npm run build`
+   - **Base directory**: (Leave EMPTY)
+   - **Package directory**: (Leave EMPTY)
+   - **Build command**: `npm ci && npm run build`
    - **Publish directory**: `.next`
    - **Functions directory**: `.netlify/functions`
 

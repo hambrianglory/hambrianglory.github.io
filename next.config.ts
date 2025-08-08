@@ -21,8 +21,9 @@ const nextConfig: NextConfig = {
   experimental: {
     // Enable runtime for Netlify Functions
     serverMinification: false,
-    serverComponentsExternalPackages: ['crypto-js', 'argon2', 'jsonwebtoken'],
   },
+  // External packages for server components
+  serverExternalPackages: ['crypto-js', 'argon2', 'jsonwebtoken'],
   // Netlify deployment configuration
   trailingSlash: false,
   // Remove standalone output for Netlify
