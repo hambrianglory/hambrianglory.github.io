@@ -26,8 +26,8 @@ export default function LoginPage() {
     setError('');
 
     try {
-      // Use relative URL for API calls - Netlify will handle routing
-      const apiUrl = '/api/auth/login';
+      // Use minimal login endpoint to bypass complex dependencies
+      const apiUrl = '/api/auth/minimal-login';
       
       console.log('Attempting login to:', apiUrl); // Debug log
       console.log('Current origin:', typeof window !== 'undefined' ? window.location.origin : 'SSR');
