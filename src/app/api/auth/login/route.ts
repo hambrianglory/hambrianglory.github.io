@@ -5,6 +5,7 @@ import jwt from 'jsonwebtoken';
 // Force dynamic rendering for API routes
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
+export const runtime = 'nodejs'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
 
