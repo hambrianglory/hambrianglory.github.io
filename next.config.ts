@@ -17,6 +17,16 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+  // Enable dynamic rendering
+  experimental: {
+    // Enable runtime for Netlify Functions
+    serverMinification: false,
+    serverComponentsExternalPackages: ['crypto-js', 'argon2', 'jsonwebtoken'],
+  },
+  // Netlify deployment configuration
+  trailingSlash: false,
+  // Configure output for Netlify
+  output: 'standalone',
 };
 
 export default nextConfig;

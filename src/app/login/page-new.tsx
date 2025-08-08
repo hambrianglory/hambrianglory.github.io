@@ -42,7 +42,6 @@ export default function LoginPage() {
           setError('You are using a temporary password. Please change it to continue.');
         } else {
           localStorage.setItem('token', data.token);
-          localStorage.setItem('user', JSON.stringify(data.user));
           if (data.user.role === 'admin') {
             router.push('/admin');
           } else {
@@ -83,7 +82,7 @@ export default function LoginPage() {
     }
 
     try {
-      const response = await fetch('/api/auth/change-password', {
+      const response = await fetch('/api/auth/login', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -91,7 +90,8 @@ export default function LoginPage() {
         body: JSON.stringify({
           email,
           oldPassword: password,
-          newPassword
+          newPassword,
+          isChangePassword: true
         }),
       });
 
@@ -132,7 +132,6 @@ export default function LoginPage() {
 
       if (response.ok) {
         localStorage.setItem('token', data.token);
-        localStorage.setItem('user', JSON.stringify(data.user));
         if (data.user.role === 'admin') {
           router.push('/admin');
         } else {
@@ -180,17 +179,6 @@ export default function LoginPage() {
 
           {!requiresPasswordChange ? (
             /* Login Form */
-            <>
-            {/* Login Instructions */}
-            <div className="mb-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
-              <h3 className="text-sm font-medium text-blue-800 mb-2">Login Instructions:</h3>
-              <div className="text-xs text-blue-700 space-y-1">
-                <p><strong>Admin:</strong> Use admin@hambriangLory.com / Admin@2025</p>
-                <p><strong>Members:</strong> Use your email and NIC number as password</p>
-                <p className="text-blue-600">Example: john@example.com / 123456789V</p>
-              </div>
-            </div>
-            
             <form className="space-y-6" onSubmit={handleLogin}>
               {error && !requiresPasswordChange && (
                 <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-center space-x-3">
@@ -211,9 +199,8 @@ export default function LoginPage() {
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm sm:text-base bg-white text-gray-900 placeholder-gray-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm sm:text-base"
                   placeholder="Enter your email"
-                  style={{ color: '#111827', backgroundColor: '#ffffff' }}
                 />
               </div>
 
@@ -230,9 +217,8 @@ export default function LoginPage() {
                     required
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm sm:text-base bg-white text-gray-900 placeholder-gray-500"
+                    className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm sm:text-base"
                     placeholder="Enter your password (NIC number for first login)"
-                    style={{ color: '#111827', backgroundColor: '#ffffff' }}
                   />
                   <button
                     type="button"
@@ -266,7 +252,6 @@ export default function LoginPage() {
                 )}
               </button>
             </form>
-            </>
           ) : (
             /* Password Change Form */
             <form className="space-y-6" onSubmit={handlePasswordChange}>
@@ -295,9 +280,8 @@ export default function LoginPage() {
                     required
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}
-                    className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm sm:text-base bg-white text-gray-900 placeholder-gray-500"
+                    className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm sm:text-base"
                     placeholder="Enter your new password"
-                    style={{ color: '#111827', backgroundColor: '#ffffff' }}
                   />
                   <button
                     type="button"
@@ -328,9 +312,8 @@ export default function LoginPage() {
                     required
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
-                    className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm sm:text-base bg-white text-gray-900 placeholder-gray-500"
+                    className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm sm:text-base"
                     placeholder="Confirm your new password"
-                    style={{ color: '#111827', backgroundColor: '#ffffff' }}
                   />
                   <button
                     type="button"

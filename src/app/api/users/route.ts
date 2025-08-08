@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { localDB } from '@/lib/localDatabase';
 import jwt from 'jsonwebtoken';
 
+// Force dynamic rendering for API routes
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
 
 // Verify JWT token
@@ -33,7 +37,6 @@ export async function GET(request: NextRequest) {
     }
     */
 
-    await localDB.initializeDatabase();
     const users = await localDB.getAllUsers();
     
     // Remove passwords from response

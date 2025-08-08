@@ -1,0 +1,6 @@
+name,email,phone,houseNumber,amount,status
+John Doe,john.doe@example.com,0771234567,A1,5000,paid
+Jane Smith,jane.smith@example.com,0779876543,B2,3000,pending
+Bob Johnson,bob.johnson@example.com,0773456789,C3,7000,overdue
+Alice Brown,alice.brown@example.com,0772345678,D4,4000,paid
+Charlie Wilson,charlie.wilson@example.com,0778765432,E5,6000,pending

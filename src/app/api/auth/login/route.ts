@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { localDB } from '@/lib/localDatabase';
 import jwt from 'jsonwebtoken';
 
+// Force dynamic rendering for API routes
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
 
 export async function POST(request: NextRequest) {
@@ -15,26 +19,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Initialize database if needed
-    await localDB.initializeDatabase();
-
     // Validate user credentials
-    const user = await localDB.validateUser(email, password);
+    const user = await localDB.authenticateUser(email, password);
     
     if (!user) {
-      // Log failed login attempt
-      await localDB.addLoginHistory({
-        userId: '',
-        email: email,
-        timestamp: new Date().toISOString(),
-        ip: request.headers.get('x-forwarded-for') || 
-            request.headers.get('x-real-ip') || 
-            'unknown',
-        userAgent: request.headers.get('user-agent') || 'unknown',
-        success: false,
-        failureReason: 'Invalid credentials'
-      });
-
       return NextResponse.json(
         { error: 'Invalid email or password' },
         { status: 401 }
@@ -51,23 +39,6 @@ export async function POST(request: NextRequest) {
 
     // Check if user needs to change password (default passwords)
     const requiresPasswordChange = password === 'Admin@2025' || password === 'password123';
-
-    // Log successful login
-    await localDB.addLoginHistory({
-      userId: user.id,
-      email: user.email,
-      timestamp: new Date().toISOString(),
-      ip: request.headers.get('x-forwarded-for') || 
-          request.headers.get('x-real-ip') || 
-          'unknown',
-      userAgent: request.headers.get('user-agent') || 'unknown',
-      success: true
-    });
-
-    // Update last login
-    await localDB.updateUser(user.id, {
-      lastLogin: new Date().toISOString()
-    });
 
     // Generate JWT token
     const token = jwt.sign(

@@ -4,8 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
-import { User } from '@/types';
-import WhatsAppComponent from '@/components/WhatsAppComponent';
+import { User } from '@/lib/localDatabase';
 import ProfilePicture from '@/components/ProfilePicture';
 import {
   Home,
@@ -85,6 +84,18 @@ export default function AdminDashboard() {
   const [historyOffset, setHistoryOffset] = useState(0);
   const [historyHasMore, setHistoryHasMore] = useState(false);
   
+  // Bulk Delete State
+  const [selectedMembers, setSelectedMembers] = useState<Set<string>>(new Set());
+  const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
+  
+  // WhatsApp State
+  const [whatsAppSessionStatus, setWhatsAppSessionStatus] = useState<string>('unknown');
+  const [whatsAppLoading, setWhatsAppLoading] = useState(false);
+  const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
+  const [whatsAppMessage, setWhatsAppMessage] = useState('');
+  const [whatsAppResults, setWhatsAppResults] = useState<any[]>([]);
+  const [showWhatsAppResults, setShowWhatsAppResults] = useState(false);
+  
   const router = useRouter();
 
   // Filter members based on search term
@@ -96,7 +107,7 @@ export default function AdminDashboard() {
         member.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         member.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
         member.phone.includes(searchTerm) ||
-        member.nicNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (member.nicNumber && member.nicNumber.toLowerCase().includes(searchTerm.toLowerCase())) ||
         (member.houseNumber && member.houseNumber.toLowerCase().includes(searchTerm.toLowerCase())) ||
         member.role.toLowerCase().includes(searchTerm.toLowerCase())
       );
@@ -155,6 +166,9 @@ export default function AdminDashboard() {
       }
       
       setLoading(false);
+      
+      // Check WhatsApp session status
+      checkWhatsAppStatus();
     } catch (error) {
       console.error('Error loading data:', error);
       setMembers([]);
@@ -463,10 +477,12 @@ export default function AdminDashboard() {
     if (editingMember && editForm) {
       try {
         // Update member in backend
+        const token = localStorage.getItem('token');
         const response = await fetch('/api/users', {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
           },
           body: JSON.stringify({
             id: editingMember,
@@ -504,11 +520,18 @@ export default function AdminDashboard() {
   };
 
   const handleInputChange = (field: keyof User, value: string | boolean) => {
+    let processedValue = value;
+    
+    // Format phone number with +94 country code
+    if (field === 'phone' && typeof value === 'string') {
+      processedValue = formatPhoneNumber(value);
+    }
+    
     setEditForm(prev => ({
       ...prev,
       [field]: field === 'dateOfBirth' || field === 'membershipDate' 
-        ? new Date(value as string) 
-        : value
+        ? new Date(processedValue as string) 
+        : processedValue
     }));
   };
 
@@ -517,8 +540,12 @@ export default function AdminDashboard() {
     if (window.confirm(`Are you sure you want to delete member "${memberName}"? This action cannot be undone.`)) {
       try {
         // Delete member from backend
-        const response = await fetch(`/api/users?id=${memberId}`, {
+        const token = localStorage.getItem('token');
+        const response = await fetch(`/api/users?userId=${memberId}`, {
           method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${token}`
+          },
         });
 
         if (response.ok) {
@@ -582,11 +609,18 @@ export default function AdminDashboard() {
   };
 
   const handleAddMemberInputChange = (field: keyof User, value: string | boolean | Date) => {
+    let processedValue = value;
+    
+    // Format phone number with +94 country code
+    if (field === 'phone' && typeof value === 'string') {
+      processedValue = formatPhoneNumber(value);
+    }
+    
     setAddMemberForm(prev => ({
       ...prev,
-      [field]: field === 'dateOfBirth' && typeof value === 'string' 
-        ? new Date(value) 
-        : value
+      [field]: field === 'dateOfBirth' && typeof processedValue === 'string' 
+        ? new Date(processedValue) 
+        : processedValue
     }));
   };
 
@@ -613,12 +647,15 @@ export default function AdminDashboard() {
       email: addMemberForm.email!,
       phone: addMemberForm.phone!,
       nicNumber: addMemberForm.nicNumber!,
+      password: addMemberForm.nicNumber!, // Set NIC as temporary password
       dateOfBirth: addMemberForm.dateOfBirth || new Date(),
       address: addMemberForm.address || '',
       role: addMemberForm.role as 'member' | 'admin' || 'member',
       houseNumber: addMemberForm.houseNumber,
       membershipDate: new Date(), // Set to current date
-      isActive: addMemberForm.isActive !== undefined ? addMemberForm.isActive : true
+      isActive: addMemberForm.isActive !== undefined ? addMemberForm.isActive : true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
     };
 
     // Add to local state
@@ -636,10 +673,12 @@ export default function AdminDashboard() {
 
     // Add to DataService for persistence
     try {
+      const token = localStorage.getItem('token');
       const response = await fetch('/api/users', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify(newMember),
       });
@@ -675,6 +714,318 @@ export default function AdminDashboard() {
       houseNumber: '',
       isActive: true
     });
+  };
+
+  // Phone number formatting function
+  const formatPhoneNumber = (phoneNumber: string): string => {
+    // Remove all non-digit characters
+    const cleanNumber = phoneNumber.replace(/\D/g, '');
+    
+    // If it starts with '94', add the '+' prefix
+    if (cleanNumber.startsWith('94')) {
+      return '+' + cleanNumber;
+    }
+    
+    // If it starts with '0', replace with '+94'
+    if (cleanNumber.startsWith('0')) {
+      return '+94' + cleanNumber.substring(1);
+    }
+    
+    // If it doesn't start with '+94' or '94' or '0', add '+94' prefix
+    if (!cleanNumber.startsWith('94')) {
+      return '+94' + cleanNumber;
+    }
+    
+    return '+' + cleanNumber;
+  };
+
+  // Bulk delete functions
+  const toggleMemberSelection = (memberId: string) => {
+    const newSelected = new Set(selectedMembers);
+    if (newSelected.has(memberId)) {
+      newSelected.delete(memberId);
+    } else {
+      newSelected.add(memberId);
+    }
+    setSelectedMembers(newSelected);
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedMembers.size === filteredMembers.length) {
+      setSelectedMembers(new Set());
+    } else {
+      setSelectedMembers(new Set(filteredMembers.map(member => member.id)));
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedMembers.size === 0) {
+      alert('Please select members to delete');
+      return;
+    }
+
+    setShowBulkDeleteConfirm(true);
+  };
+
+  const confirmBulkDelete = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const deletePromises = Array.from(selectedMembers).map(memberId =>
+        fetch(`/api/users?userId=${memberId}`, {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${token}`
+          },
+        })
+      );
+
+      const results = await Promise.all(deletePromises);
+      const successfulDeletes = results.filter(response => response.ok);
+      
+      if (successfulDeletes.length > 0) {
+        // Update local state
+        const updatedMembers = members.filter(member => !selectedMembers.has(member.id));
+        setMembers(updatedMembers);
+        setFilteredMembers(updatedMembers.filter(member =>
+          !searchTerm.trim() ||
+          member.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          member.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          member.phone.includes(searchTerm) ||
+          member.nicNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          (member.houseNumber && member.houseNumber.toLowerCase().includes(searchTerm.toLowerCase())) ||
+          member.role.toLowerCase().includes(searchTerm.toLowerCase())
+        ));
+        
+        // Update stats
+        setStats(prev => prev ? {
+          ...prev,
+          totalMembers: updatedMembers.length
+        } : null);
+
+        alert(`${successfulDeletes.length} member(s) deleted successfully!`);
+        
+        // Reload data to ensure consistency
+        loadData();
+      } else {
+        alert('Failed to delete selected members');
+      }
+    } catch (error) {
+      console.error('Error during bulk delete:', error);
+      alert('An error occurred while deleting members');
+    } finally {
+      setSelectedMembers(new Set());
+      setShowBulkDeleteConfirm(false);
+    }
+  };
+
+  // WhatsApp Functions
+  const checkWhatsAppStatus = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch('/api/whatsapp/session', {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setWhatsAppSessionStatus(data.status?.status || 'unknown');
+      } else {
+        setWhatsAppSessionStatus('error');
+      }
+    } catch (error) {
+      console.error('Error checking WhatsApp status:', error);
+      setWhatsAppSessionStatus('error');
+    }
+  };
+
+  const startWhatsAppSession = async () => {
+    setWhatsAppLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch('/api/whatsapp/session', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ action: 'start' })
+      });
+
+      const data = await response.json();
+      
+      if (response.ok) {
+        if (data.qrCode) {
+          alert('WhatsApp session started! Please scan the QR code in the WAHA interface.');
+        }
+        setWhatsAppSessionStatus(data.success ? 'started' : 'error');
+      } else {
+        alert(data.error || 'Failed to start WhatsApp session');
+      }
+    } catch (error) {
+      console.error('Error starting WhatsApp session:', error);
+      alert('Failed to start WhatsApp session');
+    } finally {
+      setWhatsAppLoading(false);
+    }
+  };
+
+  const sendPaymentReminders = async () => {
+    setWhatsAppLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      
+      let targetMembers: any[] = [];
+      
+      // If members are selected, use them; otherwise use all overdue members
+      if (selectedMembers.size > 0) {
+        targetMembers = Array.from(selectedMembers).map(id => 
+          members.find(member => member.id === id)
+        ).filter(Boolean);
+      } else {
+        // Get overdue members only if no specific selection
+        targetMembers = members.filter(member => 
+          member.role === 'member' && 
+          (member.status === 'overdue' || member.status === 'pending')
+        );
+      }
+
+      if (targetMembers.length === 0) {
+        if (selectedMembers.size > 0) {
+          alert('No valid members selected for payment reminders.');
+        } else {
+          alert('No members with overdue payments found.');
+        }
+        return;
+      }
+
+      const response = await fetch('/api/whatsapp/notify', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          action: 'payment-reminder',
+          memberIds: targetMembers.map(m => m.id)
+        })
+      });
+
+      const data = await response.json();
+      
+      if (response.ok) {
+        setWhatsAppResults(data.results || []);
+        setShowWhatsAppResults(true);
+        const successCount = data.statistics?.successful || 0;
+        const failedCount = data.statistics?.failed || 0;
+        alert(`Payment reminders sent to ${targetMembers.length} member(s)! Success: ${successCount}, Failed: ${failedCount}`);
+      } else {
+        alert(data.error || 'Failed to send payment reminders');
+      }
+    } catch (error) {
+      console.error('Error sending payment reminders:', error);
+      alert('Failed to send payment reminders');
+    } finally {
+      setWhatsAppLoading(false);
+    }
+  };
+
+  const sendCustomMessage = async () => {
+    if (!whatsAppMessage.trim()) {
+      alert('Please enter a message to send');
+      return;
+    }
+
+    setWhatsAppLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      
+      // Get selected members or all active members
+      const targetMemberIds = selectedMembers.size > 0 
+        ? Array.from(selectedMembers)
+        : members.filter(m => m.role === 'member' && m.isActive).map(m => m.id);
+
+      if (targetMemberIds.length === 0) {
+        alert('No members selected for sending messages.');
+        return;
+      }
+
+      const response = await fetch('/api/whatsapp/notify', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          action: 'custom-message',
+          memberIds: targetMemberIds,
+          customMessage: whatsAppMessage
+        })
+      });
+
+      const data = await response.json();
+      
+      if (response.ok) {
+        setWhatsAppResults(data.results || []);
+        setShowWhatsAppResults(true);
+        setShowWhatsAppModal(false);
+        setWhatsAppMessage('');
+        alert(`Messages sent! Success: ${data.statistics?.successful || 0}, Failed: ${data.statistics?.failed || 0}`);
+      } else {
+        alert(data.error || 'Failed to send messages');
+      }
+    } catch (error) {
+      console.error('Error sending custom messages:', error);
+      alert('Failed to send messages');
+    } finally {
+      setWhatsAppLoading(false);
+    }
+  };
+
+  const sendWelcomeMessages = async () => {
+    setWhatsAppLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      
+      // Get selected members or all active members
+      const targetMemberIds = selectedMembers.size > 0 
+        ? Array.from(selectedMembers)
+        : members.filter(m => m.role === 'member' && m.isActive).map(m => m.id);
+
+      if (targetMemberIds.length === 0) {
+        alert('No members selected for welcome messages.');
+        return;
+      }
+
+      const response = await fetch('/api/whatsapp/notify', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          action: 'welcome-message',
+          memberIds: targetMemberIds
+        })
+      });
+
+      const data = await response.json();
+      
+      if (response.ok) {
+        setWhatsAppResults(data.results || []);
+        setShowWhatsAppResults(true);
+        alert(`Welcome messages sent! Success: ${data.statistics?.successful || 0}, Failed: ${data.statistics?.failed || 0}`);
+      } else {
+        alert(data.error || 'Failed to send welcome messages');
+      }
+    } catch (error) {
+      console.error('Error sending welcome messages:', error);
+      alert('Failed to send welcome messages');
+    } finally {
+      setWhatsAppLoading(false);
+    }
   };
 
   // Account Management Functions
@@ -1252,20 +1603,33 @@ export default function AdminDashboard() {
         {/* Member Management Tab */}
         {activeTab === 'members' && (
           <div className="bg-white rounded-lg shadow-sm border border-gray-200">
-            <div className="px-6 py-4 border-b border-gray-200">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between space-y-3 sm:space-y-0">
-                <div>
-                  <h2 className="text-lg font-semibold text-gray-900">All Members</h2>
-                  <p className="text-sm text-gray-600">View and edit member details ({filteredMembers.length} of {members.length} members)</p>
-                </div>
-                <div className="flex flex-col sm:flex-row sm:items-center space-y-2 sm:space-y-0 sm:space-x-3">
-                  <button
-                    onClick={handleAddMember}
-                    className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-                  >
-                    <UserPlus className="w-4 h-4 mr-2" />
-                    Add Member
-                  </button>
+            <div className="px-6 py-4 border-b border-gray-200">                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between space-y-3 sm:space-y-0">
+                  <div>
+                    <h2 className="text-lg font-semibold text-gray-900">All Members</h2>
+                    <p className="text-sm text-gray-600">View and edit member details ({filteredMembers.length} of {members.length} members)</p>
+                    {selectedMembers.size > 0 && (
+                      <p className="text-sm text-blue-600">
+                        {selectedMembers.size} member(s) selected
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex flex-col sm:flex-row sm:items-center space-y-2 sm:space-y-0 sm:space-x-3">
+                    {selectedMembers.size > 0 && (
+                      <button
+                        onClick={handleBulkDelete}
+                        className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
+                      >
+                        <Trash2 className="w-4 h-4 mr-2" />
+                        Delete Selected ({selectedMembers.size})
+                      </button>
+                    )}
+                    <button
+                      onClick={handleAddMember}
+                      className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                    >
+                      <UserPlus className="w-4 h-4 mr-2" />
+                      Add Member
+                    </button>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                       <Search className="h-5 w-5 text-gray-400" />
@@ -1285,6 +1649,14 @@ export default function AdminDashboard() {
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <input
+                        type="checkbox"
+                        checked={selectedMembers.size > 0 && selectedMembers.size === filteredMembers.length}
+                        onChange={toggleSelectAll}
+                        className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      />
+                    </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Member</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Contact</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Personal Info</th>
@@ -1294,7 +1666,15 @@ export default function AdminDashboard() {
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
                   {filteredMembers.map((member) => (
-                    <tr key={member.id}>
+                    <tr key={member.id} className={selectedMembers.has(member.id) ? 'bg-blue-50' : ''}>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <input
+                          type="checkbox"
+                          checked={selectedMembers.has(member.id)}
+                          onChange={() => toggleMemberSelection(member.id)}
+                          className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                        />
+                      </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         {editingMember === member.id ? (
                           <div className="space-y-2">
@@ -1661,8 +2041,139 @@ export default function AdminDashboard() {
         )}
 
         {activeTab === 'whatsapp' && (
-          <div className="text-gray-900">
-            <WhatsAppComponent />
+          <div className="space-y-6">
+            {/* WhatsApp Status Card */}
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-lg font-semibold text-gray-900">WhatsApp Integration</h2>
+                <div className="flex items-center space-x-3">
+                  <div className={`px-3 py-1 rounded-full text-xs font-medium ${
+                    whatsAppSessionStatus === 'started' || whatsAppSessionStatus === 'WORKING' 
+                      ? 'bg-green-100 text-green-800'
+                      : whatsAppSessionStatus === 'error'
+                      ? 'bg-red-100 text-red-800'
+                      : 'bg-yellow-100 text-yellow-800'
+                  }`}>
+                    Status: {whatsAppSessionStatus === 'WORKING' ? 'Connected' : whatsAppSessionStatus}
+                  </div>
+                  <button
+                    onClick={checkWhatsAppStatus}
+                    className="px-3 py-1 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+              
+              {whatsAppSessionStatus !== 'WORKING' && whatsAppSessionStatus !== 'started' && (
+                <div className="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                  <div className="flex items-center">
+                    <AlertCircle className="w-5 h-5 text-yellow-600 mr-2" />
+                    <p className="text-sm text-yellow-700">
+                      WhatsApp session is not active. Start the session and scan QR code to enable notifications.
+                    </p>
+                  </div>
+                  <button
+                    onClick={startWhatsAppSession}
+                    disabled={whatsAppLoading}
+                    className="mt-3 px-4 py-2 bg-yellow-600 text-white rounded-md text-sm font-medium hover:bg-yellow-700 disabled:opacity-50"
+                  >
+                    {whatsAppLoading ? 'Starting...' : 'Start WhatsApp Session'}
+                  </button>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <button
+                  onClick={sendPaymentReminders}
+                  disabled={whatsAppLoading || whatsAppSessionStatus !== 'WORKING'}
+                  className="flex items-center justify-center p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 hover:bg-red-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <DollarSign className="w-5 h-5 mr-2" />
+                  <div className="text-left">
+                    <div className="font-medium">Payment Reminders</div>
+                    <div className="text-xs">
+                      {selectedMembers.size > 0 
+                        ? `Send to ${selectedMembers.size} selected` 
+                        : 'Send to overdue members'
+                      }
+                    </div>
+                  </div>
+                </button>
+
+                <button
+                  onClick={() => setShowWhatsAppModal(true)}
+                  disabled={whatsAppLoading || whatsAppSessionStatus !== 'WORKING'}
+                  className="flex items-center justify-center p-4 bg-blue-50 border border-blue-200 rounded-lg text-blue-700 hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <MessageSquare className="w-5 h-5 mr-2" />
+                  <div className="text-left">
+                    <div className="font-medium">Custom Message</div>
+                    <div className="text-xs">
+                      {selectedMembers.size > 0 
+                        ? `Send to ${selectedMembers.size} selected` 
+                        : 'Send to selected members'
+                      }
+                    </div>
+                  </div>
+                </button>
+
+                <button
+                  onClick={sendWelcomeMessages}
+                  disabled={whatsAppLoading || whatsAppSessionStatus !== 'WORKING'}
+                  className="flex items-center justify-center p-4 bg-green-50 border border-green-200 rounded-lg text-green-700 hover:bg-green-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <UserPlus className="w-5 h-5 mr-2" />
+                  <div className="text-left">
+                    <div className="font-medium">Welcome Messages</div>
+                    <div className="text-xs">Send to selected members</div>
+                  </div>
+                </button>
+              </div>
+
+              {selectedMembers.size > 0 && (
+                <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                  <p className="text-sm text-blue-700">
+                    {selectedMembers.size} member(s) selected for WhatsApp notifications
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* WhatsApp Instructions */}
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Setup Instructions</h3>
+              <div className="space-y-3 text-sm text-gray-600">
+                <div className="flex items-start">
+                  <span className="flex-shrink-0 w-6 h-6 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs font-medium mr-3">1</span>
+                  <div>
+                    <p className="font-medium text-gray-900">Install WAHA (WhatsApp HTTP API)</p>
+                    <p>Run: <code className="bg-gray-100 px-2 py-1 rounded">docker run -it -p 3000:3000/tcp devlikeapro/waha</code></p>
+                  </div>
+                </div>
+                <div className="flex items-start">
+                  <span className="flex-shrink-0 w-6 h-6 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs font-medium mr-3">2</span>
+                  <div>
+                    <p className="font-medium text-gray-900">Start WhatsApp Session</p>
+                    <p>Click "Start WhatsApp Session" button above</p>
+                  </div>
+                </div>
+                <div className="flex items-start">
+                  <span className="flex-shrink-0 w-6 h-6 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs font-medium mr-3">3</span>
+                  <div>
+                    <p className="font-medium text-gray-900">Scan QR Code</p>
+                    <p>Open WhatsApp on your phone and scan the QR code from WAHA interface</p>
+                  </div>
+                </div>
+                <div className="flex items-start">
+                  <span className="flex-shrink-0 w-6 h-6 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs font-medium mr-3">4</span>
+                  <div>
+                    <p className="font-medium text-gray-900">Send Notifications</p>
+                    <p>Use the buttons above to send payment reminders, custom messages, or welcome messages</p>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         )}
 
@@ -2101,6 +2612,180 @@ export default function AdminDashboard() {
           </div>
         )}
       </div>
+
+      {/* Bulk Delete Confirmation Modal */}
+      {showBulkDeleteConfirm && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+          <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+            <div className="mt-3">
+              <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-red-100">
+                <Trash2 className="h-6 w-6 text-red-600" />
+              </div>
+              <div className="mt-4 text-center">
+                <h3 className="text-lg font-medium text-gray-900">
+                  Confirm Bulk Delete
+                </h3>
+                <div className="mt-2 text-sm text-gray-500">
+                  <p>
+                    Are you sure you want to delete {selectedMembers.size} selected member(s)? 
+                    This action cannot be undone.
+                  </p>
+                  <div className="mt-4 max-h-32 overflow-y-auto bg-gray-50 rounded-md p-3">
+                    <p className="text-xs font-medium text-gray-700 mb-2">Members to be deleted:</p>
+                    {Array.from(selectedMembers).map(memberId => {
+                      const member = members.find(m => m.id === memberId);
+                      return member ? (
+                        <div key={memberId} className="text-xs text-gray-600 py-1">
+                          • {member.name} ({member.email})
+                        </div>
+                      ) : null;
+                    })}
+                  </div>
+                </div>
+                <div className="flex justify-center space-x-3 mt-6">
+                  <button
+                    onClick={() => setShowBulkDeleteConfirm(false)}
+                    className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={confirmBulkDelete}
+                    className="px-4 py-2 border border-transparent rounded-md text-sm font-medium text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
+                  >
+                    Delete {selectedMembers.size} Member(s)
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* WhatsApp Custom Message Modal */}
+      {showWhatsAppModal && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+          <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+            <div className="mt-3">
+              <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-blue-100">
+                <MessageSquare className="h-6 w-6 text-blue-600" />
+              </div>
+              <div className="mt-4 text-center">
+                <h3 className="text-lg font-medium text-gray-900">
+                  Send Custom WhatsApp Message
+                </h3>
+                <div className="mt-4">
+                  <textarea
+                    value={whatsAppMessage}
+                    onChange={(e) => setWhatsAppMessage(e.target.value)}
+                    placeholder="Enter your message here..."
+                    className="w-full h-32 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <p className="mt-2 text-xs text-gray-500">
+                    {selectedMembers.size > 0 
+                      ? `Message will be sent to ${selectedMembers.size} selected member(s)`
+                      : 'Message will be sent to all active members'
+                    }
+                  </p>
+                </div>
+                <div className="mt-6 flex space-x-3">
+                  <button
+                    onClick={() => {
+                      setShowWhatsAppModal(false);
+                      setWhatsAppMessage('');
+                    }}
+                    className="flex-1 px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={sendCustomMessage}
+                    disabled={whatsAppLoading || !whatsAppMessage.trim()}
+                    className="flex-1 px-4 py-2 border border-transparent rounded-md text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {whatsAppLoading ? 'Sending...' : 'Send Message'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* WhatsApp Results Modal */}
+      {showWhatsAppResults && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+          <div className="relative top-10 mx-auto p-5 border w-4/5 max-w-4xl shadow-lg rounded-md bg-white">
+            <div className="mt-3">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-lg font-medium text-gray-900">
+                  WhatsApp Notification Results
+                </h3>
+                <button
+                  onClick={() => setShowWhatsAppResults(false)}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <X className="h-6 w-6" />
+                </button>
+              </div>
+              
+              <div className="max-h-96 overflow-y-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Member
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Phone
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Status
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Error
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {whatsAppResults.map((result, index) => (
+                      <tr key={index}>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                          {result.name}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          {result.phone}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                            result.success 
+                              ? 'bg-green-100 text-green-800'
+                              : 'bg-red-100 text-red-800'
+                          }`}>
+                            {result.success ? 'Success' : 'Failed'}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-red-600">
+                          {result.error || '-'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              
+              <div className="mt-4 flex justify-end">
+                <button
+                  onClick={() => setShowWhatsAppResults(false)}
+                  className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -5,6 +5,19 @@ const STORAGE_KEY = 'cfms_encrypted_data';
 const CLOUD_SYNC_KEY = 'cfms_cloud_sync_url';
 const ENCRYPTION_KEY = 'HambrianGlory2025CommunityFeeManagement';
 
+// Import ServerPasswordStorage for server-side password management
+let ServerPasswordStorage: any = null;
+let ServerUserStorage: any = null;
+if (typeof window === 'undefined') {
+  // Only import on server-side
+  try {
+    ServerPasswordStorage = require('./serverPasswordStorage').ServerPasswordStorage;
+    ServerUserStorage = require('./serverUserStorage').ServerUserStorage;
+  } catch (error) {
+    console.log('Server storage modules not available');
+  }
+}
+
 export interface User {
   id: string;
   email: string;
@@ -347,6 +360,16 @@ class EncryptedLocalStorage {
     const db = this.getDatabase();
     const user = db.users.find(u => u.email === email && u.isActive);
     
+    // Debug logging
+    console.log('🔍 Authentication Debug:', {
+      email,
+      password,
+      userFound: !!user,
+      userRole: user?.role,
+      userNIC: user?.nicNumber,
+      userPassword: user?.password
+    });
+    
     // Check if user exists
     if (!user) {
       this.logLoginAttempt(db, email, 'unknown', false, 'User not found');
@@ -359,8 +382,38 @@ class EncryptedLocalStorage {
       return null;
     }
     
-    const hashedPassword = this.hashPassword(password);
-    const isValidPassword = user.password === hashedPassword;
+    let isValidPassword = false;
+    
+    // Check server-side storage first (for password changes)
+    if (typeof window === 'undefined' && ServerPasswordStorage) {
+      try {
+        isValidPassword = ServerPasswordStorage.validatePassword(user.id, password);
+        console.log('🔐 Server-side validation result:', isValidPassword);
+      } catch (error) {
+        console.log('Server-side password validation failed, falling back to default');
+      }
+    }
+    
+    // If server-side validation failed or not available, check default passwords
+    if (!isValidPassword) {
+      // For members, allow login with NIC number as password
+      if (user.role === 'member' && user.nicNumber && password === user.nicNumber) {
+        console.log('✅ NIC password match for member');
+        isValidPassword = true;
+      } else {
+        // Check hashed password for admin or changed passwords
+        const hashedPassword = this.hashPassword(password);
+        console.log('🔒 Checking hashed password:', {
+          inputPassword: password,
+          hashedInput: hashedPassword,
+          storedPassword: user.password,
+          matches: user.password === hashedPassword
+        });
+        isValidPassword = user.password === hashedPassword;
+      }
+    }
+    
+    console.log('🎯 Final authentication result:', isValidPassword);
     
     if (isValidPassword) {
       // Reset failed login attempts on successful login
@@ -453,17 +506,48 @@ class EncryptedLocalStorage {
     if (existingUser) {
       throw new Error('User with this email already exists');
     }
+
+    // For members, if password equals NIC, store it as plain text for NIC authentication
+    // For admins or custom passwords, hash the password
+    let processedPassword = userData.password;
+    if (userData.role === 'member' && userData.nicNumber && userData.password === userData.nicNumber) {
+      // Keep NIC as plain text for member authentication
+      processedPassword = userData.password;
+    } else {
+      // Hash other passwords (admin, custom passwords)
+      processedPassword = this.hashPassword(userData.password);
+    }
     
     const newUser: User = {
       ...userData,
       id: userData.id || this.generateId(),
+      password: processedPassword,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       isActive: true
     };
     
+    console.log('👤 Adding new user:', {
+      email: newUser.email,
+      role: newUser.role,
+      nicNumber: newUser.nicNumber,
+      passwordType: userData.password === userData.nicNumber ? 'NIC' : 'Custom'
+    });
+    
     db.users.push(newUser);
     this.saveDatabase(db);
+    
+    // Also save to server-side storage for persistence
+    if (typeof window === 'undefined' && ServerUserStorage) {
+      try {
+        console.log('Saving new user to server storage...');
+        ServerUserStorage.addImportedUser(newUser);
+        console.log('New user saved to server storage successfully');
+      } catch (error) {
+        console.error('Failed to save user to server storage:', error);
+      }
+    }
+    
     return newUser;
   }
 
@@ -490,20 +574,75 @@ class EncryptedLocalStorage {
   async deleteUser(userId: string): Promise<boolean> {
     const db = this.getDatabase();
     const userIndex = db.users.findIndex(u => u.id === userId);
+    let userDeleted = false;
     
-    if (userIndex === -1) return false;
+    if (userIndex !== -1) {
+      // Store user email before deletion for server storage cleanup
+      const userEmail = db.users[userIndex].email;
+      
+      // Soft delete from main database - mark as inactive
+      db.users[userIndex].isActive = false;
+      db.users[userIndex].updatedAt = new Date().toISOString();
+      this.saveDatabase(db);
+      userDeleted = true;
+      
+      // Also remove from server storage (imported users)
+      if (typeof window === 'undefined' && ServerUserStorage) {
+        try {
+          console.log('Removing imported user from server storage:', userEmail);
+          ServerUserStorage.removeImportedUser(userEmail);
+        } catch (error) {
+          console.error('Error removing imported user:', error);
+        }
+      }
+    } else {
+      // User not found in main database, check if it's in server storage only
+      if (typeof window === 'undefined' && ServerUserStorage) {
+        try {
+          const importedUsers = ServerUserStorage.getImportedUsers();
+          const importedUser = importedUsers.find((u: any) => u.id === userId);
+          if (importedUser) {
+            console.log('Removing user from server storage only:', importedUser.email);
+            ServerUserStorage.removeImportedUser(importedUser.email);
+            userDeleted = true;
+          }
+        } catch (error) {
+          console.error('Error removing imported user:', error);
+        }
+      }
+    }
     
-    // Soft delete - mark as inactive
-    db.users[userIndex].isActive = false;
-    db.users[userIndex].updatedAt = new Date().toISOString();
-    
-    this.saveDatabase(db);
-    return true;
+    return userDeleted;
   }
 
   async getAllUsers(): Promise<User[]> {
     const db = this.getDatabase();
-    return db.users.filter(u => u.isActive);
+    let allUsers = db.users.filter(u => u.isActive);
+    
+    // Add imported users from server storage (server-side only)
+    if (typeof window === 'undefined' && ServerUserStorage) {
+      try {
+        console.log('Loading imported users from server storage...');
+        const importedUsers = ServerUserStorage.getImportedUsers();
+        console.log('Found imported users:', importedUsers.length);
+        
+        // Filter imported users to only include active ones
+        const activeImportedUsers = importedUsers.filter((u: any) => u.isActive !== false);
+        
+        // Merge imported users, avoiding duplicates by email
+        const existingEmails = new Set(allUsers.map(u => u.email));
+        const newImportedUsers = activeImportedUsers.filter((u: any) => !existingEmails.has(u.email));
+        console.log('New imported users to add:', newImportedUsers.length);
+        allUsers = [...allUsers, ...newImportedUsers];
+        console.log('Total users after merge:', allUsers.length);
+      } catch (error) {
+        console.error('Could not load imported users:', error);
+      }
+    } else {
+      console.log('ServerUserStorage not available or client-side');
+    }
+    
+    return allUsers;
   }
 
   async getUserById(userId: string): Promise<User | null> {
@@ -681,6 +820,10 @@ class EncryptedLocalStorage {
 
   // Data import/export methods
   async importUsers(userData: any[]): Promise<{ success: boolean; added: number; updated: number; errors: string[] }> {
+    console.log('🔄 Starting user import process...');
+    console.log('📋 Server-side check:', typeof window === 'undefined' ? 'YES' : 'NO');
+    console.log('📋 ServerUserStorage available:', ServerUserStorage ? 'YES' : 'NO');
+    
     const db = this.getDatabase();
     let added = 0;
     let updated = 0;
@@ -728,6 +871,15 @@ class EncryptedLocalStorage {
             // Add new user
             db.users.push(userData);
             added++;
+          }
+
+          // Also save to server storage if available (for persistence)
+          if (typeof window === 'undefined' && ServerUserStorage) {
+            try {
+              ServerUserStorage.addImportedUser(userData);
+            } catch (error) {
+              console.log('Could not save to server storage:', error);
+            }
           }
         } catch (error) {
           errors.push(`Error processing user ${userRecord.name || userRecord.email}: ${error}`);

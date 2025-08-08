@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Upload API Debug Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .console { background: #000; color: #0f0; padding: 15px; border-radius: 5px; font-family: monospace; }
+        .button { background: #007cba; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; }
+        .button:hover { background: #005a8a; }
+    </style>
+</head>
+<body>
+    <h1>🧪 Upload API Debug Test</h1>
+    <button class="button" onclick="runTest()">Test Upload API</button>
+    <div id="console" class="console" style="margin-top: 20px; min-height: 200px;"></div>
+
+    <script>
+        const consoleDiv = document.getElementById('console');
+        
+        function log(message) {
+            consoleDiv.innerHTML += message + '<br>';
+            consoleDiv.scrollTop = consoleDiv.scrollHeight;
+            console.log(message);
+        }
+        
+        function clearConsole() {
+            consoleDiv.innerHTML = '';
+        }
+
+        async function runTest() {
+            clearConsole();
+            log('🧪 Testing Upload API...');
+            
+            // Create test CSV content
+            const csvContent = `name,email,phone,houseNumber,amount,status
+Test User 1,test1@example.com,0771234567,T1,5000,paid
+Test User 2,test2@example.com,0779876543,T2,3000,pending`;
+
+            // Create FormData
+            const formData = new FormData();
+            const blob = new Blob([csvContent], { type: 'text/csv' });
+            const file = new File([blob], 'test-users.csv', { type: 'text/csv' });
+            
+            formData.append('file', file);
+            formData.append('type', 'users');
+
+            try {
+                log('📤 Sending upload request...');
+                const response = await fetch('/api/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                log('📊 Response Status: ' + response.status);
+                log('📊 Response Status Text: ' + response.statusText);
+                
+                const result = await response.json();
+                log('📋 Response Data: ' + JSON.stringify(result, null, 2));
+
+                if (response.ok) {
+                    log('✅ Upload successful!');
+                    
+                    // Test if users were actually imported
+                    log('');
+                    log('🔍 Checking if users were imported...');
+                    const usersResponse = await fetch('/api/users');
+                    const usersData = await usersResponse.json();
+                    
+                    log('👥 Users API Status: ' + usersResponse.status);
+                    log('👥 Total Users: ' + (usersData.users ? usersData.users.length : 'unknown'));
+                    
+                    if (usersData.users) {
+                        const testUsers = usersData.users.filter(u => u.email.includes('test'));
+                        log('🎯 Test Users Found: ' + testUsers.length);
+                        testUsers.forEach(user => log('   - ' + user.name + ' (' + user.email + ')'));
+                    }
+                } else {
+                    log('❌ Upload failed!');
+                    log('Error: ' + (result.error || 'Unknown error'));
+                }
+            } catch (error) {
+                log('💥 Network Error: ' + error.message);
+            }
+        }
+        
+        // Auto-run the test
+        window.addEventListener('load', () => {
+            setTimeout(runTest, 1000);
+        });
+    </script>
+</body>
+</html>
