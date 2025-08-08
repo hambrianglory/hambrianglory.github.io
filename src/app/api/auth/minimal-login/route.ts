@@ -24,6 +24,17 @@ export async function POST(request: NextRequest) {
     const adminEmail = process.env.ADMIN_EMAIL || 'admin@hambrianglory.lk';
     const adminPassword = process.env.ADMIN_PASSWORD || 'HambrianGlory@2025!Admin';
     
+    console.log('Authentication comparison:', {
+      requestEmail: email,
+      adminEmail: adminEmail,
+      emailMatch: email === adminEmail,
+      requestPassword: password,
+      adminPassword: adminPassword,
+      passwordMatch: password === adminPassword,
+      requestPasswordLength: password ? password.length : 0,
+      adminPasswordLength: adminPassword ? adminPassword.length : 0
+    });
+    
     if (email === adminEmail && password === adminPassword) {
       console.log('✅ Admin authentication successful');
       
@@ -52,7 +63,16 @@ export async function POST(request: NextRequest) {
     
     return NextResponse.json({
       success: false,
-      error: 'Invalid credentials'
+      error: 'Invalid credentials',
+      debug: {
+        requestEmail: email,
+        adminEmailSet: !!process.env.ADMIN_EMAIL,
+        adminPasswordSet: !!process.env.ADMIN_PASSWORD,
+        emailMatch: email === adminEmail,
+        passwordMatch: password === adminPassword,
+        adminEmailFallback: adminEmail,
+        adminPasswordLength: adminPassword ? adminPassword.length : 0
+      }
     }, {
       status: 401,
       headers: {

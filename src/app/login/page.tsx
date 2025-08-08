@@ -42,12 +42,18 @@ export default function LoginPage() {
 
       console.log('Response status:', response.status); // Debug log
       
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
       const data = await response.json();
       console.log('Response data:', data); // Debug log
+
+      if (!response.ok) {
+        console.log('Authentication failed with debug info:', data.debug); // Debug log
+        if (data.debug) {
+          setError(`Authentication failed. Debug info: ${JSON.stringify(data.debug, null, 2)}`);
+        } else {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        return;
+      }
 
       if (data.success) {
         if (data.requiresPasswordChange) {
@@ -67,7 +73,8 @@ export default function LoginPage() {
       }
     } catch (error) {
       console.error('Login error:', error); // Debug log
-      setError(`Network error: ${error.message}. Please check if environment variables are set.`);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      setError(`Network error: ${errorMessage}. Please check if environment variables are set.`);
     } finally {
       setLoading(false);
     }
